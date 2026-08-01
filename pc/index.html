@@ -352,8 +352,9 @@ document.querySelectorAll('input[name=prod]').forEach(function(r){
         x.closest(".opt").classList.toggle("checked", x.checked);
       });
       var now = loop.info();
-      toast("GeoMet ne sert pas la couche « " + wanted + " ». Retour à "
-            + now.quantity.toLowerCase() + " — " + now.phase.toLowerCase() + ".");
+      toast("« " + wanted + " » indisponible — "
+            + (loop.lastError ? loop.lastError.message.replace(/\.+$/, "") : "cause inconnue")
+            + ". Retour à " + now.quantity.toLowerCase() + " — " + now.phase.toLowerCase() + ".");
     }
     if($("#coverage").checked) setCoverage(true);   // la couverture suit la phase
   };

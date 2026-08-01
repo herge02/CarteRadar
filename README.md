@@ -31,6 +31,11 @@ manifest.webmanifest       installation sur l'écran d'accueil
 Le fichier `assets/radar-core.js` contient toute la logique météo : lecture de
 l'axe temps dans le `GetCapabilities`, construction des couches WMS, lecture,
 rafraîchissement aux six minutes, `GetFeatureInfo` pour l'intensité au point.
+
+L'axe temps admet les deux écritures de la norme WMS, que GeoMet emploie selon
+le produit : l'intervalle `début/fin/pas` et la liste d'instants séparés par
+des virgules, y compris mêlées dans une même valeur. Les durées ISO 8601 sont
+lues au complet, le `M` valant mois avant le `T` et minutes après.
 Les deux pages ne font qu'y brancher leurs commandes. Une correction du moteur
 profite donc aux deux versions.
 

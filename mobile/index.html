@@ -325,8 +325,9 @@ async function applyProduct(){
     choice.phase    = loop.info().phase;
     choice.quantity = loop.info().quantity;
     syncProductInputs();
-    toast("GeoMet ne sert pas la couche « " + id + " ». Retour à "
-          + choice.quantity.toLowerCase() + " — " + choice.phase.toLowerCase() + ".");
+    toast("« " + id + " » indisponible — "
+          + (loop.lastError ? loop.lastError.message.replace(/\.+$/, "") : "cause inconnue")
+          + ". Retour à " + choice.quantity.toLowerCase() + " — " + choice.phase.toLowerCase() + ".");
   }
   if($("#coverage").checked) setCoverage(true);   // la couverture suit la phase
 }

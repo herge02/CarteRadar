@@ -86,27 +86,80 @@ async function fetchTimes(product, wanted){
   var res = await fetch(url);
   if(!res.ok) throw new Error("GetCapabilities " + res.status);
 
-  var xml = new DOMParser().parseFromString(await res.text(), "text/xml");
+  var body = await res.text();
+  var xml  = new DOMParser().parseFromString(body, "text/xml");
+
+  /* GeoMet répond parfois 200 en portant un rapport d'exception OGC. */
+  var exc = xml.getElementsByTagName("ServiceException")[0]
+         || xml.getElementsByTagName("ExceptionText")[0];
+  if(exc) throw new Error("refus de GeoMet : " + exc.textContent.trim().slice(0, 120));
+
   var all = xml.getElementsByTagName("Dimension"), dim = null;
   for(var i = 0; i < all.length; i++){
     if((all[i].getAttribute("name") || "").toLowerCase() === "time"){ dim = all[i]; break; }
   }
   if(!dim) dim = all[0];
-  if(!dim) throw new Error("dimension temporelle absente");
+  if(!dim) throw new Error("couche sans dimension temporelle");
 
-  var parts  = dim.textContent.trim().split("/");
-  var m      = /PT(?:(\d+)H)?(?:(\d+)M)?/.exec(parts[2] || "PT6M") || [];
-  var stepMs = ((+m[1] || 0) * 60 + (+m[2] || 6)) * 60000;
+  var raw   = dim.textContent.trim();
+  var times = expandTimeDimension(raw, wanted);
+  if(!times.length) throw new Error("axe temps illisible : « " + raw.slice(0, 60) + " »");
 
-  var d0 = new Date(parts[0]), d1 = new Date(parts[1]);
-  if(isNaN(d1)) throw new Error("axe temps illisible");
+  return { times: times.slice(-wanted), available: times.length, raw: raw };
+}
 
-  var available = Math.floor((d1 - d0) / stepMs) + 1;
-  var n = Math.max(1, Math.min(wanted, available));
+/*  Durée ISO 8601 en millisecondes. Le « M » vaut mois avant le T, minutes
+    après : c'est la position qui tranche, d'où les deux groupes.          */
+function durationMs(iso){
+  var m = /^P(?:(\d+(?:\.\d+)?)Y)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/
+          .exec((iso || "").trim());
+  if(!m) return 0;
+  return ((+m[1] || 0) * 31536000 + (+m[2] || 0) * 2592000 + (+m[3] || 0) * 86400
+        + (+m[4] || 0) * 3600     + (+m[5] || 0) * 60      + (+m[6] || 0)) * 1000;
+}
 
+/*  Le WMS admet deux écritures pour la dimension temps, et GeoMet se sert
+    des deux selon le produit : un intervalle « début/fin/pas », ou une
+    liste d'instants séparés par des virgules. Les deux peuvent même se
+    mêler dans une même liste. On développe le tout, du plus vieux au plus
+    récent, en s'arrêtant dès qu'on tient assez d'images récentes.        */
+function expandTimeDimension(raw, wanted){
+  var budget = Math.max(1, wanted) + 8;   // marge pour le rafraîchissement
   var out = [];
-  for(var k = n - 1; k >= 0; k--) out.push(new Date(d1.getTime() - k * stepMs));
-  return { times: out, available: available, step: stepMs };
+
+  raw.split(",").forEach(function(token){
+    token = token.trim();
+    if(!token) return;
+
+    if(token.indexOf("/") === -1){
+      var t = new Date(token);
+      if(!isNaN(t)) out.push(t);
+      return;
+    }
+
+    var parts = token.split("/");
+    var d0 = new Date(parts[0]);
+    var d1 = new Date(parts[1]);
+    var step = durationMs(parts[2]);
+    if(isNaN(d0) || isNaN(d1)) return;
+    if(!step) step = 6 * 60000;           // pas annoncé ou nul : six minutes
+
+    /* On remonte depuis la fin : seules les dernières images comptent. */
+    for(var t2 = d1.getTime(); t2 >= d0.getTime() && out.length < budget * 4; t2 -= step){
+      out.push(new Date(t2));
+    }
+  });
+
+  /* Dédoublonne et ordonne : une liste mixte peut se recouper. */
+  var seen = {};
+  return out
+    .filter(function(d){
+      var k = d.getTime();
+      if(seen[k]) return false;
+      seen[k] = true;
+      return true;
+    })
+    .sort(function(a, b){ return a - b; });
 }
 
 /* ============================================================ RadarLoop ==
@@ -129,6 +182,7 @@ function RadarLoop(map, opts){
   this.playing = false;
   this.timer = null;
   this.loaded = 0;
+  this.lastError = null;   // cause du dernier échec de build, pour le diagnostic
 
   this.on = Object.assign({
     built:    function(){},
@@ -162,7 +216,8 @@ RadarLoop.prototype._frame = function(date){
 RadarLoop.prototype.build = async function(){
   var data;
   try { data = await fetchTimes(this.product, this.wanted); }
-  catch(e){ this.on.error(e); return false; }
+  catch(e){ this.lastError = e; this.on.error(e); return false; }
+  this.lastError = null;
 
   var self = this;
   this.frames.forEach(function(l){ self.map.removeLayer(l); });
@@ -240,8 +295,10 @@ RadarLoop.prototype.setProduct = async function(id){
   this.pause();
   if(await this.build()) return true;
 
+  var why = this.lastError;    // le build de repli va l'effacer
   this.product = previous;
   await this.build();
+  this.lastError = why;
   return false;
 };
 
@@ -345,6 +402,8 @@ global.RadarCore = {
   basemaps: basemaps,
   panes: panes,
   fetchTimes: fetchTimes,
+  expandTimeDimension: expandTimeDimension,
+  durationMs: durationMs,
   RadarLoop: RadarLoop
 };
 
