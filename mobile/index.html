@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="description" content="Console radar météo du sud du Québec — imagerie ECCC / GeoMet, version mobile.">
+<meta name="theme-color" content="#0E1012">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Radar — Sud du Québec</title>
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/theme.css">
+<link rel="stylesheet" href="/assets/mobile.css">
+</head>
+<body>
+
+<div id="app">
+
+  <header id="top">
+    <div id="prod" role="radiogroup" aria-label="Produit animé">
+      <label>
+        <input type="radio" name="prod" value="RADAR_1KM_RRAI" checked>
+        <span>Pluie</span>
+      </label>
+      <label>
+        <input type="radio" name="prod" value="RADAR_1KM_RSNO">
+        <span>Neige</span>
+      </label>
+    </div>
+
+    <button class="icon-btn" id="legend-btn" aria-label="Échelle de couleurs" aria-pressed="false">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2h14v3H1zm0 4.5h14v3H1zM1 11h14v3H1z"/></svg>
+    </button>
+    <button class="icon-btn" id="sheet-btn" aria-label="Réglages et couches" aria-expanded="false">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 1 5l7 4 7-4zM1 8l7 4 7-4-1.8-1L8 10 2.8 7zm0 3.6L8 15.6l7-4-1.8-1L8 13.6l-5.2-3z"/></svg>
+    </button>
+  </header>
+
+  <div id="map">
+    <button id="locate" aria-label="Ma position">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0v2.1A6 6 0 0 0 2.1 8H0v1.6h2.1A6 6 0 0 0 8 15.5V16h1.6v-.5A6 6 0 0 0 15.5 9.6H16V8h-.5A6 6 0 0 0 9.6 2.1V0zm.8 3.6A4.4 4.4 0 1 1 4.4 8 4.4 4.4 0 0 1 8.8 3.6zm0 2.2A2.2 2.2 0 1 0 11 8a2.2 2.2 0 0 0-2.2-2.2z"/></svg>
+    </button>
+
+    <div id="legend"><img id="legend-img" alt="Échelle de couleurs du produit affiché"></div>
+
+    <div id="readout">
+      <div class="v" id="readout-v">—</div>
+      <div class="c" id="readout-c"></div>
+    </div>
+  </div>
+
+  <div id="dock">
+    <div id="dock-head">
+      <span id="stamp-time" class="mono">--:--</span>
+      <span id="stamp-utc" class="mono">chargement…</span>
+      <span id="live"><span class="dot"></span>direct</span>
+    </div>
+
+    <div id="dock-row">
+      <button id="play" aria-label="Lecture">
+        <svg id="play-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1.5 14 8 3 14.5z"/></svg>
+      </button>
+
+      <div id="scrub-wrap">
+        <div id="ticks"></div>
+        <div id="loadbar"></div>
+        <input type="range" id="scrub" min="0" max="0" value="0" step="1" aria-label="Position dans la boucle">
+      </div>
+
+      <button id="now" aria-label="Dernière image">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1a7 7 0 1 0 6.7 9h-2.1A5 5 0 1 1 8 3v2.5L12 3 8 .5z"/></svg>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<div id="veil"></div>
+
+<aside id="sheet" role="dialog" aria-modal="true" aria-label="Réglages et couches">
+  <button id="grip" aria-label="Fermer les réglages"></button>
+  <h2>Console radar</h2>
+  <div class="sub">ECCC · composite 1 km · MAJ 6 min</div>
+
+  <div class="group">
+    <span class="eyebrow">Image</span>
+    <div class="slider">
+      <span class="eyebrow">Opacité</span>
+      <input type="range" id="opacity" min="20" max="100" value="78">
+      <span class="val" id="opacity-val">78 %</span>
+    </div>
+    <div class="slider">
+      <span class="eyebrow">Vitesse</span>
+      <input type="range" id="fps" min="1" max="14" step="1" value="5">
+      <span class="val" id="fps-val">5 i/s</span>
+    </div>
+    <div class="slider">
+      <span class="eyebrow">Images</span>
+      <input type="range" id="frames" min="6" max="30" value="15">
+      <span class="val" id="frames-val">15</span>
+    </div>
+    <p class="hint">GeoMet ne diffuse que les 3 dernières heures, soit 30 images au maximum.
+      Moins d'images, c'est moins de données mobiles.</p>
+  </div>
+
+  <div class="group">
+    <span class="eyebrow">Couches fixes</span>
+    <label class="opt"><input type="checkbox" id="coverage"> Couverture radar</label>
+    <label class="opt"><input type="checkbox" id="labels" checked> Noms de lieux par-dessus</label>
+  </div>
+
+  <div class="group">
+    <span class="eyebrow">Fond de carte</span>
+    <label class="opt"><input type="radio" name="base" value="dark" checked> Sombre</label>
+    <label class="opt"><input type="radio" name="base" value="light"> Clair</label>
+    <label class="opt"><input type="radio" name="base" value="sat"> Relief</label>
+  </div>
+
+  <div class="group">
+    <span class="eyebrow">Ajouter une couche GeoMet</span>
+    <div class="field">
+      <input type="text" id="custom-id" placeholder="ex. HRDPS.CONTINENTAL_PR"
+             spellcheck="false" autocapitalize="off" autocorrect="off">
+      <button id="custom-add">Ajouter</button>
+    </div>
+    <div id="custom-list"></div>
+  </div>
+
+  <div id="sheet-foot">
+    <a class="swap" href="/pc?v=pc">Passer à la vue bureau →</a>
+    <p class="hint">Touchez la carte pour lire l'intensité sous le doigt.</p>
+  </div>
+</aside>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/assets/radar-core.js"></script>
+<script>
+(function(){
+"use strict";
+
+var C = window.RadarCore;
+var $ = function(s){ return document.querySelector(s); };
+var prefs = C.Prefs.read();
+
+/* ------------------------------------------------------------------ carte */
+var view = prefs.view || { lat:45.65, lng:-73.85, zoom:9 };   // Blainville
+var map = L.map("map", {
+  center:[view.lat, view.lng],
+  zoom:view.zoom,
+  zoomControl:false,
+  minZoom:4,
+  maxZoom:13,
+  worldCopyJump:false,
+  tap:false                       // laisse Leaflet utiliser les événements pointeur
+});
+C.panes(map);   // ni zoom ni échelle : le pincement suffit, l'écran est étroit
+
+var maps    = C.basemaps();
+var baseKey = prefs.base && maps.bases[prefs.base] ? prefs.base : "dark";
+maps.bases[baseKey].addTo(map);
+maps.labels[baseKey].addTo(map);
+
+map.on("moveend", function(){
+  var c = map.getCenter();
+  C.Prefs.write({ view:{ lat:c.lat, lng:c.lng, zoom:map.getZoom() } });
+});
+
+/* ------------------------------------------------------ message éphémère */
+var toastTimer;
+function toast(msg){
+  var t = $("#toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.style.display = "none"; }, 6000);
+}
+
+/* ------------------------------------------------------------- la boucle */
+/* Sur mobile on charge moins d'images par défaut : chaque image est une
+   requête WMS par tuile visible, et la donnée cellulaire se paie. */
+var loop = new C.RadarLoop(map, {
+  product: prefs.product || "RADAR_1KM_RRAI",
+  wanted : prefs.wantedMobile || 15,
+  fps    : prefs.fps     || 5,
+  opacity: prefs.opacity != null ? prefs.opacity : 0.78,
+  on: {
+    built    : onBuilt,
+    show     : onShow,
+    progress : onProgress,
+    playing  : onPlaying,
+    error    : function(e){
+      $("#stamp-utc").textContent = "GeoMet injoignable";
+      toast("Impossible de joindre GeoMet : " + e.message + ". Nouvel essai dans 60 s.");
+    }
+  }
+});
+
+var PLAY  = "M3 1.5 14 8 3 14.5z";
+var PAUSE = "M3 2h4v12H3zM9 2h4v12H9z";
+
+function onPlaying(on){
+  $("#play-icon").setAttribute("d", on ? PAUSE : PLAY);
+  $("#play").setAttribute("aria-label", on ? "Pause" : "Lecture");
+}
+
+function onProgress(ratio){
+  var bar = $("#loadbar");
+  bar.style.width = "calc(" + (ratio * 100) + "% - 22px)";
+  if(ratio >= 1) setTimeout(function(){ bar.style.width = "0"; }, 600);
+}
+
+function onBuilt(l){
+  $("#frames").max = Math.max(6, l.available);
+  $("#scrub").max  = Math.max(0, l.times.length - 1);
+  drawTicks(l.times);
+  $("#legend-img").src = l.legendUrl();
+}
+
+function onShow(d, i, n){
+  $("#stamp-time").textContent = C.clock(d, { weekday:"short" });
+  $("#stamp-utc").textContent  = C.isoZ(d).replace("T", " ").replace("Z", "");
+  $("#live").classList.toggle("on", i === n - 1);
+  if(!scrubbing) $("#scrub").value = i;
+}
+
+function drawTicks(times){
+  var host = $("#ticks");
+  host.textContent = "";
+  var n = times.length;
+  times.forEach(function(d, i){
+    var t = document.createElement("div");
+    t.className = "t" + (d.getMinutes() === 0 ? " hour" : "");
+    t.style.left = (n > 1 ? i / (n - 1) * 100 : 0) + "%";
+    host.appendChild(t);
+  });
+}
+
+/* ------------------------------------------------------------- transport */
+var scrubbing = false;
+var scrub = $("#scrub");
+
+scrub.addEventListener("pointerdown", function(){ scrubbing = true; loop.pause(); });
+scrub.addEventListener("pointerup",   function(){ scrubbing = false; });
+scrub.addEventListener("pointercancel", function(){ scrubbing = false; });
+scrub.addEventListener("input", function(e){ loop.show(+e.target.value); });
+scrub.addEventListener("change", function(){ scrubbing = false; });
+
+$("#play").onclick = function(){ loop.toggle(); };
+$("#now").onclick  = function(){ loop.pause(); loop.show(loop.times.length - 1); };
+
+/* -------------------------------------------------------------- réglages */
+$("#fps").value = loop.fps;
+$("#fps-val").textContent = loop.fps + " i/s";
+$("#fps").oninput = function(e){
+  loop.setFps(+e.target.value);
+  $("#fps-val").textContent = loop.fps + " i/s";
+  C.Prefs.write({ fps:loop.fps });
+};
+
+$("#opacity").value = Math.round(loop.opacity * 100);
+$("#opacity-val").textContent = Math.round(loop.opacity * 100) + " %";
+$("#opacity").oninput = function(e){
+  loop.setOpacity(+e.target.value / 100);
+  $("#opacity-val").textContent = e.target.value + " %";
+  C.Prefs.write({ opacity:loop.opacity });
+};
+
+$("#frames").value = loop.wanted;
+$("#frames-val").textContent = loop.wanted;
+var framesDebounce;
+$("#frames").oninput = function(e){
+  var n = +e.target.value;
+  $("#frames-val").textContent = n;
+  clearTimeout(framesDebounce);
+  framesDebounce = setTimeout(function(){
+    loop.setWanted(n);
+    C.Prefs.write({ wantedMobile:n });
+  }, 500);
+};
+
+document.querySelector('input[name=prod][value="' + loop.product + '"]').checked = true;
+document.querySelectorAll('input[name=prod]').forEach(function(r){
+  r.onchange = function(e){
+    loop.setProduct(e.target.value);
+    C.Prefs.write({ product:e.target.value });
+    if(coverageLayer){ $("#coverage").checked = false; setCoverage(false); }
+  };
+});
+
+document.querySelectorAll(".opt input").forEach(function(i){
+  var sync = function(){ i.closest(".opt").classList.toggle("checked", i.checked); };
+  i.addEventListener("change", sync);
+  sync();
+});
+
+/* --------------------------------------------------------- couches fixes */
+var coverageLayer = null;
+function setCoverage(on){
+  if(coverageLayer){ map.removeLayer(coverageLayer); coverageLayer = null; }
+  if(!on) return;
+  var id = loop.info().coverage;
+  if(!id) return;
+  coverageLayer = L.tileLayer.wms(C.GEOMET + "?", {
+    layers:id, format:"image/png", transparent:true,
+    version:"1.3.0", opacity:.45, pane:"static"
+  }).addTo(map);
+}
+$("#coverage").onchange = function(e){ setCoverage(e.target.checked); };
+
+$("#labels").onchange = function(e){
+  if(e.target.checked) maps.labels[baseKey].addTo(map);
+  else map.removeLayer(maps.labels[baseKey]);
+};
+
+document.querySelector('input[name=base][value="' + baseKey + '"]').checked = true;
+document.querySelectorAll('input[name=base]').forEach(function(r){
+  r.onchange = function(e){
+    var withLabels = $("#labels").checked;
+    map.removeLayer(maps.bases[baseKey]);
+    map.removeLayer(maps.labels[baseKey]);
+    baseKey = e.target.value;
+    maps.bases[baseKey].addTo(map);
+    if(withLabels) maps.labels[baseKey].addTo(map);
+    C.Prefs.write({ base:baseKey });
+  };
+});
+
+/* --------------------------------------------- couches ajoutées à la main */
+var custom = {};
+function addCustom(id){
+  id = (id || "").trim();
+  if(!id || custom[id]) return;
+
+  var layer = L.tileLayer.wms(C.GEOMET + "?", {
+    layers:id, format:"image/png", transparent:true,
+    version:"1.3.0", opacity:.7, pane:"static"
+  });
+  var failed = false;
+  layer.on("tileerror", function(){
+    if(failed) return;
+    failed = true;
+    toast("Couche « " + id + " » refusée par GeoMet. Vérifiez l'identifiant.");
+  });
+  layer.addTo(map);
+  custom[id] = layer;
+
+  var chip = document.createElement("div");
+  chip.className = "chip";
+  chip.innerHTML = '<span></span><button aria-label="Retirer la couche">&times;</button>';
+  chip.querySelector("span").textContent = id;
+  chip.querySelector("button").onclick = function(){
+    map.removeLayer(custom[id]);
+    delete custom[id];
+    chip.remove();
+  };
+  $("#custom-list").appendChild(chip);
+  $("#custom-id").value = "";
+  $("#custom-id").blur();
+}
+$("#custom-add").onclick = function(){ addCustom($("#custom-id").value); };
+$("#custom-id").addEventListener("keydown", function(e){
+  if(e.key === "Enter") addCustom(e.target.value);
+});
+
+/* --------------------------------------------------------------- légende */
+$("#legend-btn").onclick = function(){
+  var on = $("#legend").style.display !== "block";
+  $("#legend").style.display = on ? "block" : "none";
+  $("#legend-btn").classList.toggle("on", on);
+  $("#legend-btn").setAttribute("aria-pressed", String(on));
+};
+
+/* ---------------------------------------------------------- feuille basse */
+function openSheet(on){
+  $("#sheet").classList.toggle("open", on);
+  $("#veil").classList.toggle("open", on);
+  $("#sheet-btn").setAttribute("aria-expanded", String(on));
+}
+$("#sheet-btn").onclick = function(){ openSheet(!$("#sheet").classList.contains("open")); };
+$("#veil").onclick = function(){ openSheet(false); };
+$("#grip").onclick = function(){ openSheet(false); };
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape") openSheet(false);
+});
+
+/* -------------------------------------------------------------- position */
+var hereMarker = null;
+$("#locate").onclick = function(){
+  if(!navigator.geolocation){ toast("Géolocalisation non disponible sur cet appareil."); return; }
+  navigator.geolocation.getCurrentPosition(function(pos){
+    var ll = [pos.coords.latitude, pos.coords.longitude];
+    if(hereMarker) map.removeLayer(hereMarker);
+    hereMarker = L.marker(ll, {
+      icon: L.divIcon({ className:"here", html:"<i></i>", iconSize:[12,12] }),
+      keyboard:false, interactive:false
+    }).addTo(map);
+    map.setView(ll, Math.max(map.getZoom(), 9));
+  }, function(){
+    toast("Position refusée ou indisponible.");
+  }, { enableHighAccuracy:false, timeout:8000, maximumAge:60000 });
+};
+
+/* ------------------------------------------------------ lecture au point */
+map.on("click", async function(ev){
+  if(!loop.times.length) return;
+
+  var coords = ev.latlng.lat.toFixed(3) + ", " + ev.latlng.lng.toFixed(3);
+  $("#readout").style.display = "flex";
+  $("#readout-v").textContent = "…";
+  $("#readout-c").textContent = coords;
+
+  try {
+    var r = await loop.valueAt(ev.latlng);
+    $("#readout-v").textContent = (r.value === null || isNaN(r.value))
+      ? "aucun écho"
+      : r.value.toFixed(2) + " " + r.unit;
+    $("#readout-c").textContent = coords + " · " + $("#stamp-time").textContent;
+  } catch(e){
+    $("#readout-v").textContent = "lecture impossible";
+  }
+  clearTimeout(map._readoutTimer);
+  map._readoutTimer = setTimeout(function(){ $("#readout").style.display = "none"; }, 12000);
+});
+
+/* ------------------------------------------ hauteur réelle et redimension */
+function resize(){ map.invalidateSize(); }
+window.addEventListener("resize", resize);
+window.addEventListener("orientationchange", function(){ setTimeout(resize, 250); });
+
+/* ---------------------------------------- rafraîchissement et mise en veille */
+setInterval(function(){
+  if(document.hidden) return;
+  loop.refresh();
+}, 60000);
+
+/* En arrière-plan, l'animation ne sert à rien et consomme la pile. */
+document.addEventListener("visibilitychange", function(){
+  if(document.hidden) loop.pause();
+});
+
+loop.build().then(function(ok){
+  if(ok) setTimeout(function(){ loop.play(); }, 1200);
+  else setTimeout(function(){ loop.build(); }, 60000);
+});
+
+})();
+</script>
+</body>
+</html>

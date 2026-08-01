@@ -1,0 +1,323 @@
+/*  Version mobile : mise en page en trois bandes, commandes au pouce,
+    réglages dans une feuille qui monte du bas. Pensée pour le tactile.    */
+
+:root{
+  --top-h:52px;
+  --safe-b:env(safe-area-inset-bottom, 0px);
+  --safe-t:env(safe-area-inset-top, 0px);
+}
+
+html,body{ overscroll-behavior:none }
+
+#app{
+  position:fixed; inset:0;
+  display:grid;
+  grid-template-rows:auto 1fr auto;
+  height:100vh;
+  height:100dvh;
+}
+
+/* ------------------------------------------------------------ bande haute */
+#top{
+  display:flex; align-items:center; gap:10px;
+  height:calc(var(--top-h) + var(--safe-t));
+  padding:var(--safe-t) 12px 0;
+  background:var(--panel);
+  border-bottom:1px solid var(--rule);
+  z-index:1000;
+}
+
+/* sélecteur de produit, deux segments */
+#prod{
+  display:flex; flex:1 1 auto; min-width:0;
+  background:var(--ink);
+  border:1px solid var(--rule);
+  border-radius:3px;
+  padding:2px;
+  gap:2px;
+}
+#prod label{ flex:1 1 0; min-width:0 }
+#prod input{ position:absolute; opacity:0; pointer-events:none }
+#prod span{
+  display:block;
+  padding:8px 6px;
+  text-align:center;
+  font-size:12px; font-weight:600;
+  letter-spacing:.1em; text-transform:uppercase;
+  color:var(--dim);
+  border-radius:2px;
+  cursor:pointer;
+  white-space:nowrap;
+}
+#prod input:checked + span{ background:var(--panel-2); color:var(--bone) }
+#prod input:focus-visible + span{ outline:2px solid var(--bone); outline-offset:2px }
+
+.icon-btn{
+  flex:0 0 auto;
+  width:40px; height:40px;
+  display:grid; place-items:center;
+  background:var(--ink);
+  border:1px solid var(--rule);
+  border-radius:3px;
+  color:var(--bone);
+  padding:0; cursor:pointer;
+}
+.icon-btn svg{ width:17px; height:17px; fill:currentColor }
+.icon-btn.on{ background:var(--panel-2); border-color:var(--dim) }
+
+/* ------------------------------------------------------------------ carte */
+#map{ position:relative; background:var(--ink); z-index:1 }
+
+#locate{
+  position:absolute; right:12px; top:12px; z-index:600;
+  width:42px; height:42px;
+  background:rgba(21,24,27,.94);
+  border:1px solid var(--rule);
+  border-radius:3px;
+  color:var(--bone);
+  display:grid; place-items:center;
+  padding:0; cursor:pointer;
+}
+#locate svg{ width:18px; height:18px; fill:currentColor }
+
+#legend{
+  position:absolute; left:12px; top:12px; z-index:600;
+  background:rgba(21,24,27,.94);
+  border:1px solid var(--rule);
+  border-radius:3px;
+  padding:6px;
+  display:none;
+}
+#legend img{ display:block; max-height:34vh; width:auto }
+
+/* Remonté pour laisser passer la ligne d'attribution de Leaflet. */
+#readout{
+  position:absolute; left:12px; right:12px; bottom:26px; z-index:600;
+  background:rgba(21,24,27,.96);
+  border:1px solid var(--rule);
+  border-radius:3px;
+  padding:10px 12px;
+  display:none;
+  align-items:baseline; gap:10px;
+}
+#readout .v{ font-family:"IBM Plex Mono",monospace; font-size:18px; color:var(--bone) }
+#readout .c{ font-family:"IBM Plex Mono",monospace; font-size:10px; color:var(--dimmer); margin-left:auto; text-align:right }
+
+/* ------------------------------------------------------------- bande basse */
+#dock{
+  background:rgba(14,16,18,.97);
+  border-top:1px solid var(--rule);
+  padding:10px 12px calc(10px + var(--safe-b));
+  z-index:1000;
+}
+
+#dock-head{ display:flex; align-items:baseline; gap:9px; margin-bottom:8px }
+#stamp-time{
+  font-family:"IBM Plex Mono",monospace;
+  font-size:21px; font-weight:500; line-height:1;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+#stamp-utc{ font-family:"IBM Plex Mono",monospace; font-size:10px; color:var(--dimmer) }
+
+#live{
+  margin-left:auto;
+  display:inline-flex; align-items:center; gap:5px;
+  font-size:9.5px; font-weight:600;
+  letter-spacing:.16em; text-transform:uppercase;
+  color:var(--dimmer);
+}
+#live .dot{ width:6px; height:6px; border-radius:50%; background:var(--dimmer) }
+#live.on{ color:var(--live) }
+#live.on .dot{ background:var(--live); animation:pulse 2.4s ease-in-out infinite }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.25} }
+
+#dock-row{ display:flex; align-items:center; gap:12px }
+
+#play{
+  flex:0 0 auto;
+  width:48px; height:48px;
+  display:grid; place-items:center;
+  background:var(--panel-2);
+  border:1px solid var(--rule);
+  border-radius:3px;
+  color:var(--bone);
+  padding:0; cursor:pointer;
+}
+#play svg{ width:18px; height:18px; fill:currentColor }
+
+#now{
+  flex:0 0 auto;
+  width:42px; height:42px;
+  display:grid; place-items:center;
+  background:var(--panel);
+  border:1px solid var(--rule);
+  border-radius:3px;
+  color:var(--bone);
+  padding:0; cursor:pointer;
+}
+#now svg{ width:15px; height:15px; fill:currentColor }
+
+/* piste de défilement : graduations discrètes derrière un curseur natif */
+#scrub-wrap{ position:relative; flex:1 1 auto; min-width:0; height:48px }
+#ticks{ position:absolute; left:11px; right:11px; top:9px; height:8px; pointer-events:none }
+#ticks .t{ position:absolute; bottom:0; width:1px; height:5px; background:var(--dimmer); transform:translateX(-.5px) }
+#ticks .t.hour{ height:9px; background:var(--dim) }
+#loadbar{
+  position:absolute; left:11px; top:23px; height:1px;
+  background:var(--dim); width:0;
+  pointer-events:none;
+}
+
+#scrub{
+  -webkit-appearance:none; appearance:none;
+  position:absolute; left:0; right:0; top:12px;
+  width:100%; height:36px;
+  background:transparent;
+  margin:0;
+  touch-action:pan-y;
+}
+#scrub::-webkit-slider-runnable-track{ height:2px; background:var(--rule) }
+#scrub::-moz-range-track{ height:2px; background:var(--rule) }
+#scrub::-webkit-slider-thumb{
+  -webkit-appearance:none;
+  width:22px; height:22px; margin-top:-10px;
+  background:var(--bone);
+  border:0; border-radius:3px;
+  box-shadow:0 0 10px rgba(233,229,221,.35);
+}
+#scrub::-moz-range-thumb{
+  width:22px; height:22px;
+  background:var(--bone);
+  border:0; border-radius:3px;
+}
+
+/* ---------------------------------------------------------- feuille basse */
+#veil{
+  position:fixed; inset:0; z-index:1100;
+  background:rgba(6,7,8,.6);
+  opacity:0; pointer-events:none;
+  transition:opacity .2s ease;
+}
+#veil.open{ opacity:1; pointer-events:auto }
+
+#sheet{
+  position:fixed; left:0; right:0; bottom:0; z-index:1200;
+  max-height:82dvh;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  background:var(--panel);
+  border-top:1px solid var(--rule);
+  border-radius:12px 12px 0 0;
+  padding:8px 16px calc(24px + var(--safe-b));
+  transform:translateY(102%);
+  transition:transform .24s cubic-bezier(.32,.72,0,1);
+}
+#sheet.open{ transform:translateY(0) }
+
+/* La poignée referme la feuille : sa cible tactile déborde volontairement
+   du trait visible, dessiné par le pseudo-élément. */
+#grip{
+  display:block;
+  width:100%; height:26px;
+  border:0; padding:0;
+  background:none;
+  cursor:pointer;
+  margin-bottom:10px;
+}
+#grip::before{
+  content:"";
+  display:block;
+  width:38px; height:4px;
+  margin:8px auto 0;
+  background:var(--rule);
+  border-radius:2px;
+}
+
+#sheet h2{
+  font-size:12px; font-weight:600;
+  letter-spacing:.16em; text-transform:uppercase;
+  margin:0 0 2px;
+}
+#sheet .sub{
+  font-family:"IBM Plex Mono",monospace; font-size:10px;
+  color:var(--dimmer); margin-bottom:20px;
+}
+
+.group{ margin-bottom:22px }
+.group>.eyebrow{
+  display:block; margin-bottom:10px;
+  padding-bottom:7px; border-bottom:1px solid var(--rule);
+}
+
+.opt{
+  display:flex; align-items:center; gap:12px;
+  padding:11px 0;
+  font-size:15px; color:var(--dim);
+  cursor:pointer;
+}
+.opt input{ accent-color:var(--bone); width:19px; height:19px; margin:0; flex:0 0 auto }
+.opt.checked{ color:var(--bone) }
+.unit{ font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--dimmer); margin-left:auto }
+
+.slider{ display:flex; align-items:center; gap:12px; padding:8px 0 }
+.slider .eyebrow{ flex:0 0 74px }
+.slider input[type=range]{
+  -webkit-appearance:none; appearance:none;
+  flex:1 1 auto; min-width:0;
+  height:34px; background:transparent; margin:0;
+  cursor:pointer;
+}
+.slider input[type=range]::-webkit-slider-runnable-track{ height:2px; background:var(--rule) }
+.slider input[type=range]::-moz-range-track{ height:2px; background:var(--rule) }
+.slider input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;
+  width:20px; height:20px; margin-top:-9px;
+  background:var(--bone); border:0; border-radius:3px;
+}
+.slider input[type=range]::-moz-range-thumb{
+  width:20px; height:20px;
+  background:var(--bone); border:0; border-radius:3px;
+}
+.slider .val{
+  flex:0 0 auto;
+  font-family:"IBM Plex Mono",monospace; font-size:12px;
+  color:var(--bone); min-width:52px; text-align:right;
+}
+
+.field{ display:flex; gap:8px; margin-top:8px }
+.field input[type=text]{
+  flex:1; min-width:0;
+  background:var(--ink);
+  border:1px solid var(--rule);
+  color:var(--bone);
+  font-family:"IBM Plex Mono",monospace; font-size:16px;
+  padding:11px 10px; border-radius:3px;
+}
+.field input:focus{ outline:none; border-color:var(--dim) }
+.field button{
+  background:var(--panel-2);
+  border:1px solid var(--rule);
+  color:var(--bone);
+  font-family:inherit; font-size:11px; font-weight:600;
+  letter-spacing:.1em; text-transform:uppercase;
+  padding:0 14px; cursor:pointer; border-radius:3px;
+}
+
+.hint{ font-size:12px; color:var(--dimmer); line-height:1.5; margin-top:9px }
+
+.chip{
+  display:flex; align-items:center; gap:10px;
+  background:var(--ink);
+  border:1px solid var(--rule);
+  padding:10px; margin-top:8px; border-radius:3px;
+  font-family:"IBM Plex Mono",monospace; font-size:12px;
+}
+.chip span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.chip button{
+  margin-left:auto; background:none; border:0;
+  color:var(--dimmer); cursor:pointer;
+  font-size:20px; line-height:1; padding:0 6px;
+}
+
+#sheet-foot{ padding-top:16px; border-top:1px solid var(--rule) }

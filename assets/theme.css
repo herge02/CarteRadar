@@ -1,0 +1,102 @@
+/*  Vocabulaire visuel commun aux deux consoles : palette, typographie et
+    éléments partagés (étiquettes, message éphémère, habillage Leaflet).   */
+
+:root{
+  --ink:#0E1012;
+  --panel:#15181B;
+  --panel-2:#1D2126;
+  --rule:#2B3138;
+  --bone:#E9E5DD;
+  --dim:#8C949C;
+  --dimmer:#5C646C;
+  --live:#C4402F;
+}
+
+*{ box-sizing:border-box }
+
+html,body{
+  height:100%;
+  margin:0;
+  background:var(--ink);
+  overflow:hidden;
+  -webkit-text-size-adjust:100%;
+}
+
+body{
+  font-family:"IBM Plex Sans Condensed",system-ui,sans-serif;
+  color:var(--bone);
+}
+
+.mono{ font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums }
+
+.eyebrow{
+  font-size:10px;
+  font-weight:600;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--dimmer);
+}
+
+/* --------------------------------------------------------------- Leaflet */
+.leaflet-container{ background:var(--ink); font-family:"IBM Plex Mono",monospace }
+.leaflet-control-attribution{
+  background:rgba(14,16,18,.82)!important;
+  color:var(--dimmer)!important;
+  font-size:9px!important;
+  letter-spacing:.02em;
+  border-radius:0;
+}
+.leaflet-control-attribution a{ color:var(--dim)!important }
+.leaflet-bar a{ background:var(--panel); color:var(--bone); border-bottom-color:var(--rule) }
+.leaflet-bar a:hover{ background:var(--panel-2); color:#fff }
+
+/* Repère de position : un point, pas une épingle. */
+.here{ position:relative }
+.here i{
+  position:absolute; left:50%; top:50%;
+  width:12px; height:12px; margin:-6px 0 0 -6px;
+  border-radius:50%;
+  background:var(--bone);
+  border:2px solid var(--ink);
+  box-shadow:0 0 0 1px rgba(233,229,221,.55), 0 0 12px rgba(233,229,221,.35);
+}
+
+/* ------------------------------------------------------ message éphémère */
+#toast{
+  position:absolute; left:50%; top:16px;
+  transform:translateX(-50%);
+  z-index:1400;
+  background:var(--panel);
+  border:1px solid var(--rule);
+  border-left:2px solid var(--live);
+  padding:9px 14px;
+  font-size:12px;
+  line-height:1.4;
+  color:var(--bone);
+  border-radius:2px;
+  display:none;
+  max-width:min(80vw,420px);
+}
+
+/* ------------------------------------------------------- bascule de vue */
+.swap{
+  display:inline-flex; align-items:center; gap:6px;
+  background:none; border:0; padding:0;
+  color:var(--dimmer);
+  font-family:inherit;
+  font-size:10px; font-weight:600;
+  letter-spacing:.14em; text-transform:uppercase;
+  cursor:pointer;
+  text-decoration:none;
+}
+.swap:hover{ color:var(--bone) }
+
+/* --------------------------------------------------------- accessibilité */
+:where(button,a,input,[tabindex]):focus-visible{
+  outline:2px solid var(--bone);
+  outline-offset:2px;
+}
+
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001ms!important; transition-duration:.001ms!important }
+}

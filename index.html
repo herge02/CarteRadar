@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1012">
+<meta name="robots" content="noindex">
+<title>Console radar — Sud du Québec</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+
+<script>
+/*  Aiguillage vers l'une des deux consoles.
+    Priorité : choix explicite dans l'adresse (?v=pc | ?v=mobile), puis choix
+    mémorisé, puis détection de l'appareil. Le choix explicite est retenu, ce
+    qui permet de forcer la vue bureau sur une tablette et l'inverse.      */
+(function(){
+  var q = new URLSearchParams(location.search).get("v");
+  var choice = null;
+
+  if(q === "pc" || q === "mobile"){
+    choice = q;
+    try { localStorage.setItem("carteradar:vue", choice); } catch(e){}
+  }
+
+  if(!choice){
+    try { choice = localStorage.getItem("carteradar:vue"); } catch(e){}
+  }
+
+  if(choice !== "pc" && choice !== "mobile"){
+    var ua      = navigator.userAgent;
+    var phone   = /Android|iPhone|iPod|Windows Phone|IEMobile|Opera Mini/i.test(ua);
+    var tactile = window.matchMedia && matchMedia("(pointer:coarse)").matches;
+    var etroit  = window.matchMedia && matchMedia("(max-width:900px)").matches;
+    /* iPadOS se présente comme un Mac : le pointeur grossier le trahit. */
+    choice = (phone || (tactile && etroit)) ? "mobile" : "pc";
+  }
+
+  location.replace("/" + choice);
+})();
+</script>
+
+<style>
+  html,body{height:100%;margin:0;background:#0E1012;color:#8C949C;
+    font-family:system-ui,sans-serif;display:grid;place-items:center}
+  .fallback{text-align:center;font-size:13px;line-height:2}
+  .fallback a{color:#E9E5DD;display:block}
+</style>
+</head>
+<body>
+<noscript>
+  <div class="fallback">
+    Cette console a besoin de JavaScript.<br>
+    <a href="/pc">Version bureau</a>
+    <a href="/mobile">Version mobile</a>
+  </div>
+</noscript>
+</body>
+</html>

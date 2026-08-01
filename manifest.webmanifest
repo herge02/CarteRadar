@@ -1,0 +1,15 @@
+{
+  "name": "Console radar — Sud du Québec",
+  "short_name": "Radar",
+  "description": "Boucle radar ECCC / GeoMet pour le sud du Québec.",
+  "lang": "fr-CA",
+  "start_url": "/mobile",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0E1012",
+  "theme_color": "#0E1012",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

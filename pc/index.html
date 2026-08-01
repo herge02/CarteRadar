@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Console radar météo du sud du Québec — imagerie ECCC / GeoMet, version bureau.">
+<meta name="theme-color" content="#0E1012">
+<title>Console radar — Sud du Québec</title>
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/theme.css">
+<link rel="stylesheet" href="/assets/pc.css">
+</head>
+<body>
+
+<div id="map"></div>
+
+<aside id="drawer">
+  <h1>Console radar</h1>
+  <div class="sub">ECCC · composite 1 km · MAJ 6 min</div>
+
+  <div class="group">
+    <span class="eyebrow">Produit animé</span>
+    <label class="opt"><input type="radio" name="prod" value="RADAR_1KM_RRAI" checked>
+      Précipitation — pluie <span class="unit">mm/h</span></label>
+    <label class="opt"><input type="radio" name="prod" value="RADAR_1KM_RSNO">
+      Précipitation — neige <span class="unit">cm/h</span></label>
+    <div class="row" style="margin-top:12px">
+      <span class="eyebrow" style="flex:0 0 auto">Opacité</span>
+      <input type="range" id="opacity" min="20" max="100" value="78" style="width:96px">
+      <span class="val mono" id="opacity-val">78 %</span>
+    </div>
+  </div>
+
+  <div class="group">
+    <span class="eyebrow">Couches fixes</span>
+    <label class="opt"><input type="checkbox" id="coverage"> Couverture radar</label>
+    <label class="opt"><input type="checkbox" id="labels" checked> Noms de lieux par-dessus</label>
+    <label class="opt"><input type="checkbox" id="legend-on"> Échelle de couleurs</label>
+  </div>
+
+  <div class="group">
+    <span class="eyebrow">Fond de carte</span>
+    <label class="opt"><input type="radio" name="base" value="dark" checked> Sombre</label>
+    <label class="opt"><input type="radio" name="base" value="light"> Clair</label>
+    <label class="opt"><input type="radio" name="base" value="sat"> Relief</label>
+  </div>
+
+  <div class="group">
+    <span class="eyebrow">Ajouter une couche GeoMet</span>
+    <div class="field">
+      <input type="text" id="custom-id" placeholder="ex. HRDPS.CONTINENTAL_PR" spellcheck="false">
+      <button id="custom-add">Ajouter</button>
+    </div>
+    <div id="custom-list"></div>
+    <p class="hint">N'importe quel identifiant du service WMS de GeoMet. La liste complète est dans le
+      GetCapabilities de <span class="mono">geo.weather.gc.ca/geomet</span>.</p>
+  </div>
+
+  <div class="group">
+    <span class="eyebrow">Images conservées</span>
+    <div class="row" style="margin-top:8px">
+      <input type="range" id="frames" min="6" max="30" value="30" style="width:96px">
+      <span class="val mono" id="frames-val">30</span>
+    </div>
+    <p class="hint">GeoMet ne diffuse que les 3 dernières heures, soit 30 images au maximum.</p>
+  </div>
+
+  <div id="drawer-foot">
+    <a class="swap" href="/mobile?v=mobile">Passer à la vue mobile →</a>
+    <p class="hint">Espace : lecture. ← → : image par image. Clic sur la carte : intensité au point.</p>
+  </div>
+</aside>
+
+<button id="drawer-toggle" aria-expanded="true">Couches</button>
+
+<div id="legend"><img id="legend-img" alt="Échelle de couleurs du produit affiché"></div>
+
+<div id="readout">
+  <span class="eyebrow">Lecture au point</span>
+  <div class="v" id="readout-v">—</div>
+  <div class="c" id="readout-c"></div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="console">
+  <div id="stamp">
+    <div id="stamp-time" class="mono">--:--</div>
+    <div id="stamp-sub">
+      <span id="stamp-utc" class="mono">chargement…</span>
+      <span id="live"><span class="dot"></span>direct</span>
+    </div>
+  </div>
+
+  <div id="track">
+    <button class="tbtn" id="prev" title="Image précédente (←)" aria-label="Image précédente">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12 2 5 8l7 6zM4 2h1.6v12H4z"/></svg></button>
+    <button class="tbtn" id="play" title="Lecture / pause (espace)" aria-label="Lecture">
+      <svg id="play-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1.5 14 8 3 14.5z"/></svg></button>
+    <button class="tbtn" id="next" title="Image suivante (→)" aria-label="Image suivante">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2l7 6-7 6zM10.4 2H12v12h-1.6z"/></svg></button>
+    <div id="ruler" role="slider" tabindex="0" aria-label="Position dans la boucle" aria-valuemin="0">
+      <div id="ruler-base"></div>
+      <div id="progress"></div>
+      <div id="head"></div>
+    </div>
+    <button class="tbtn" id="now" title="Revenir à la dernière image" aria-label="Dernière image">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1a7 7 0 1 0 6.7 9h-2.1A5 5 0 1 1 8 3v2.5L12 3 8 .5z"/></svg></button>
+  </div>
+
+  <div id="speed">
+    <div class="row">
+      <span class="eyebrow">Vitesse</span>
+      <input type="range" id="fps" min="1" max="14" step="1" value="5">
+      <span class="val" id="fps-val">5 i/s</span>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/assets/radar-core.js"></script>
+<script>
+(function(){
+"use strict";
+
+var C = window.RadarCore;
+var $ = function(s){ return document.querySelector(s); };
+var prefs = C.Prefs.read();
+
+/* ------------------------------------------------------------------ carte */
+var view = prefs.view || { lat:45.65, lng:-73.85, zoom:9 };   // Blainville
+var map = L.map("map", {
+  center:[view.lat, view.lng],
+  zoom:view.zoom,
+  zoomControl:false,
+  minZoom:4,
+  maxZoom:13,
+  worldCopyJump:false
+});
+/* Tout à droite : le tiroir, ouvert, couvre entièrement le bord gauche. */
+L.control.zoom({ position:"topright" }).addTo(map);
+L.control.scale({ imperial:false, position:"bottomright" }).addTo(map);
+C.panes(map);
+
+var maps    = C.basemaps();
+var baseKey = prefs.base && maps.bases[prefs.base] ? prefs.base : "dark";
+maps.bases[baseKey].addTo(map);
+maps.labels[baseKey].addTo(map);
+
+map.on("moveend", function(){
+  var c = map.getCenter();
+  C.Prefs.write({ view:{ lat:c.lat, lng:c.lng, zoom:map.getZoom() } });
+});
+
+/* ------------------------------------------------------ message éphémère */
+var toastTimer;
+function toast(msg){
+  var t = $("#toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.style.display = "none"; }, 6000);
+}
+
+/* ------------------------------------------------------------ la boucle */
+var loop = new C.RadarLoop(map, {
+  product: prefs.product || "RADAR_1KM_RRAI",
+  wanted : prefs.wanted  || 30,
+  fps    : prefs.fps     || 5,
+  opacity: prefs.opacity != null ? prefs.opacity : 0.78,
+  on: {
+    built    : onBuilt,
+    show     : onShow,
+    progress : onProgress,
+    playing  : onPlaying,
+    error    : function(e){
+      $("#stamp-utc").textContent = "GeoMet injoignable";
+      toast("Impossible de joindre GeoMet : " + e.message + ". Nouvel essai dans 60 s.");
+    }
+  }
+});
+
+var PLAY  = "M3 1.5 14 8 3 14.5z";
+var PAUSE = "M3 2h4v12H3zM9 2h4v12H9z";
+
+function onPlaying(on){
+  $("#play-icon").setAttribute("d", on ? PAUSE : PLAY);
+  $("#play").setAttribute("aria-label", on ? "Pause" : "Lecture");
+}
+
+function onProgress(ratio){
+  $("#progress").style.width = (ratio * 100) + "%";
+  if(ratio >= 1) setTimeout(function(){ $("#progress").style.width = "0"; }, 600);
+}
+
+function onBuilt(l){
+  $("#frames").max = Math.max(6, l.available);
+  $("#ruler").setAttribute("aria-valuemax", l.times.length - 1);
+  drawRuler(l.times);
+  refreshLegend();
+}
+
+function onShow(d, i, n){
+  $("#stamp-time").textContent = C.clock(d, { weekday:"short" });
+  $("#stamp-utc").textContent  = C.isoZ(d).replace("T", " ").replace("Z", " UTC");
+  $("#live").classList.toggle("on", i === n - 1);
+
+  var pct = n > 1 ? i / (n - 1) * 100 : 0;
+  $("#head").style.left = pct + "%";
+  $("#ruler").setAttribute("aria-valuenow", i);
+  $("#ruler").setAttribute("aria-valuetext", C.clock(d));
+}
+
+/* -------------------------------------------------------- règle graduée */
+function drawRuler(times){
+  var r = $("#ruler");
+  r.querySelectorAll(".tick").forEach(function(t){ t.remove(); });
+  var n = times.length;
+
+  times.forEach(function(d, i){
+    var pct  = n > 1 ? i / (n - 1) * 100 : 0;
+    var hour = d.getMinutes() === 0;
+
+    var t = document.createElement("div");
+    t.className = "tick" + (hour ? " hour" : "");
+    t.style.left = pct + "%";
+    r.appendChild(t);
+
+    if(hour){
+      var lab = document.createElement("div");
+      lab.className = "tick label";
+      lab.style.left = pct + "%";
+      /* Aux deux bouts, l'étiquette centrée déborderait de la règle. */
+      if(pct < 4)       lab.style.transform = "translateX(0)";
+      else if(pct > 96) lab.style.transform = "translateX(-100%)";
+      lab.textContent = C.clock(d);
+      r.appendChild(lab);
+    }
+  });
+}
+
+function scrub(clientX){
+  var b = $("#ruler").getBoundingClientRect();
+  var ratio = Math.min(1, Math.max(0, (clientX - b.left) / b.width));
+  loop.show(Math.round(ratio * (loop.times.length - 1)));
+}
+
+var dragging = false;
+$("#ruler").addEventListener("pointerdown", function(e){
+  dragging = true;
+  loop.pause();
+  $("#ruler").setPointerCapture(e.pointerId);
+  scrub(e.clientX);
+});
+$("#ruler").addEventListener("pointermove", function(e){ if(dragging) scrub(e.clientX); });
+$("#ruler").addEventListener("pointerup",     function(){ dragging = false; });
+$("#ruler").addEventListener("pointercancel", function(){ dragging = false; });
+$("#ruler").addEventListener("keydown", function(e){
+  if(e.key === "ArrowLeft" || e.key === "ArrowRight"){
+    e.preventDefault();
+    loop.pause();
+    loop.show(loop.idx + (e.key === "ArrowRight" ? 1 : -1));
+  }
+});
+
+/* ------------------------------------------------------------- transport */
+$("#play").onclick = function(){ loop.toggle(); };
+$("#prev").onclick = function(){ loop.pause(); loop.show(loop.idx - 1); };
+$("#next").onclick = function(){ loop.pause(); loop.show(loop.idx + 1); };
+$("#now").onclick  = function(){ loop.pause(); loop.show(loop.times.length - 1); };
+
+document.addEventListener("keydown", function(e){
+  if(/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+  if(e.code === "Space"){ e.preventDefault(); loop.toggle(); }
+  if(e.code === "ArrowLeft"){  loop.pause(); loop.show(loop.idx - 1); }
+  if(e.code === "ArrowRight"){ loop.pause(); loop.show(loop.idx + 1); }
+});
+
+/* -------------------------------------------------------------- réglages */
+$("#fps").value = loop.fps;
+$("#fps-val").textContent = loop.fps + " i/s";
+$("#fps").oninput = function(e){
+  loop.setFps(+e.target.value);
+  $("#fps-val").textContent = loop.fps + " i/s";
+  C.Prefs.write({ fps:loop.fps });
+};
+
+$("#opacity").value = Math.round(loop.opacity * 100);
+$("#opacity-val").textContent = Math.round(loop.opacity * 100) + " %";
+$("#opacity").oninput = function(e){
+  loop.setOpacity(+e.target.value / 100);
+  $("#opacity-val").textContent = e.target.value + " %";
+  C.Prefs.write({ opacity:loop.opacity });
+};
+
+$("#frames").value = loop.wanted;
+$("#frames-val").textContent = loop.wanted;
+var framesDebounce;
+$("#frames").oninput = function(e){
+  var n = +e.target.value;
+  $("#frames-val").textContent = n;
+  clearTimeout(framesDebounce);
+  framesDebounce = setTimeout(function(){
+    loop.setWanted(n);
+    C.Prefs.write({ wanted:n });
+  }, 400);
+};
+
+document.querySelector('input[name=prod][value="' + loop.product + '"]').checked = true;
+document.querySelectorAll('input[name=prod]').forEach(function(r){
+  r.onchange = function(e){
+    loop.setProduct(e.target.value);
+    C.Prefs.write({ product:e.target.value });
+    if(coverageLayer){ $("#coverage").checked = false; setCoverage(false); }
+  };
+});
+
+document.querySelectorAll(".opt input").forEach(function(i){
+  var sync = function(){ i.closest(".opt").classList.toggle("checked", i.checked); };
+  i.addEventListener("change", sync);
+  sync();
+});
+
+/* ------------------------------------------------------- couches fixes */
+var coverageLayer = null;
+function setCoverage(on){
+  if(coverageLayer){ map.removeLayer(coverageLayer); coverageLayer = null; }
+  if(!on) return;
+  var id = loop.info().coverage;
+  if(!id) return;
+  coverageLayer = L.tileLayer.wms(C.GEOMET + "?", {
+    layers:id, format:"image/png", transparent:true,
+    version:"1.3.0", opacity:.45, pane:"static"
+  }).addTo(map);
+}
+$("#coverage").onchange = function(e){ setCoverage(e.target.checked); };
+
+$("#labels").onchange = function(e){
+  if(e.target.checked) maps.labels[baseKey].addTo(map);
+  else map.removeLayer(maps.labels[baseKey]);
+};
+
+document.querySelector('input[name=base][value="' + baseKey + '"]').checked = true;
+document.querySelectorAll('input[name=base]').forEach(function(r){
+  r.onchange = function(e){
+    var withLabels = $("#labels").checked;
+    map.removeLayer(maps.bases[baseKey]);
+    map.removeLayer(maps.labels[baseKey]);
+    baseKey = e.target.value;
+    maps.bases[baseKey].addTo(map);
+    if(withLabels) maps.labels[baseKey].addTo(map);
+    C.Prefs.write({ base:baseKey });
+  };
+});
+
+/* --------------------------------------------- couches ajoutées à la main */
+var custom = {};
+function addCustom(id){
+  id = (id || "").trim();
+  if(!id || custom[id]) return;
+
+  var layer = L.tileLayer.wms(C.GEOMET + "?", {
+    layers:id, format:"image/png", transparent:true,
+    version:"1.3.0", opacity:.7, pane:"static"
+  });
+  var failed = false;
+  layer.on("tileerror", function(){
+    if(failed) return;
+    failed = true;
+    toast("Couche « " + id + " » refusée par GeoMet. Vérifiez l'identifiant.");
+  });
+  layer.addTo(map);
+  custom[id] = layer;
+
+  var chip = document.createElement("div");
+  chip.className = "chip";
+  chip.innerHTML = '<span></span><button title="Retirer" aria-label="Retirer la couche">&times;</button>';
+  chip.querySelector("span").textContent = id;
+  chip.querySelector("button").onclick = function(){
+    map.removeLayer(custom[id]);
+    delete custom[id];
+    chip.remove();
+  };
+  $("#custom-list").appendChild(chip);
+  $("#custom-id").value = "";
+}
+$("#custom-add").onclick = function(){ addCustom($("#custom-id").value); };
+$("#custom-id").addEventListener("keydown", function(e){
+  if(e.key === "Enter") addCustom(e.target.value);
+});
+
+/* --------------------------------------------------------------- légende */
+function refreshLegend(){ $("#legend-img").src = loop.legendUrl(); }
+$("#legend-on").onchange = function(e){
+  $("#legend").style.display = e.target.checked ? "block" : "none";
+};
+
+/* ------------------------------------------------------ lecture au point */
+map.on("click", async function(ev){
+  if(!loop.times.length) return;
+
+  var coords = ev.latlng.lat.toFixed(4) + ", " + ev.latlng.lng.toFixed(4);
+  $("#readout").style.display = "block";
+  $("#readout-v").textContent = "…";
+  $("#readout-c").textContent = coords;
+
+  try {
+    var r = await loop.valueAt(ev.latlng);
+    $("#readout-v").textContent = (r.value === null || isNaN(r.value))
+      ? "aucun écho"
+      : r.value.toFixed(2) + " " + r.unit;
+    $("#readout-c").textContent = coords + "  ·  " + $("#stamp-time").textContent;
+  } catch(e){
+    $("#readout-v").textContent = "lecture impossible";
+  }
+});
+
+/* ---------------------------------------------------------------- tiroir */
+$("#drawer-toggle").onclick = function(){
+  var closed = $("#drawer").classList.toggle("closed");
+  $("#drawer-toggle").setAttribute("aria-expanded", String(!closed));
+  setTimeout(function(){ map.invalidateSize(); }, 240);
+};
+
+/* ---------------------------------------- rafraîchissement et mise en veille */
+setInterval(function(){
+  if(document.hidden) return;
+  loop.refresh();
+}, 60000);
+
+document.addEventListener("visibilitychange", function(){
+  if(document.hidden) loop.pause();
+});
+
+loop.build().then(function(ok){
+  if(ok) setTimeout(function(){ loop.play(); }, 1500);
+  else setTimeout(function(){ loop.build(); }, 60000);
+});
+
+})();
+</script>
+</body>
+</html>
