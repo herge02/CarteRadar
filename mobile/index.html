@@ -23,13 +23,13 @@
 <div id="app">
 
   <header id="top">
-    <div id="prod" role="radiogroup" aria-label="Produit animé">
+    <div id="prod" role="radiogroup" aria-label="Phase supposée">
       <label>
-        <input type="radio" name="prod" value="RADAR_1KM_RRAI" checked>
+        <input type="radio" name="phase" value="Pluie" checked>
         <span>Pluie</span>
       </label>
       <label>
-        <input type="radio" name="prod" value="RADAR_1KM_RSNO">
+        <input type="radio" name="phase" value="Neige">
         <span>Neige</span>
       </label>
     </div>
@@ -87,6 +87,16 @@
   <button id="grip" aria-label="Fermer les réglages"></button>
   <h2>Console radar</h2>
   <div class="sub">ECCC · composite 1 km · MAJ 6 min</div>
+
+  <div class="group">
+    <span class="eyebrow">Grandeur mesurée</span>
+    <label class="opt"><input type="radio" name="quantity" value="Taux de précipitation" checked>
+      Taux de précipitation <span class="unit">mm/h · cm/h</span></label>
+    <label class="opt"><input type="radio" name="quantity" value="Réflectivité">
+      Réflectivité <span class="unit">dBZ</span></label>
+    <p class="hint">Le taux convertit l'écho en précipitation au sol. La réflectivité
+      montre l'écho brut : plus fidèle à ce que voit le radar, notamment en altitude.</p>
+  </div>
 
   <div class="group">
     <span class="eyebrow">Image</span>
@@ -226,7 +236,8 @@ function onBuilt(l){
 
 function onShow(d, i, n){
   $("#stamp-time").textContent = C.clock(d, { weekday:"short" });
-  $("#stamp-utc").textContent  = C.isoZ(d).replace("T", " ").replace("Z", "");
+  /* Étroit : l'heure UTC abrégée suffit, et l'unité dit quel produit tourne. */
+  $("#stamp-utc").textContent  = C.isoZ(d).slice(11, 16) + " UTC · " + loop.info().unit;
   $("#live").classList.toggle("on", i === n - 1);
   if(!scrubbing) $("#scrub").value = i;
 }
@@ -286,14 +297,47 @@ $("#frames").oninput = function(e){
   }, 500);
 };
 
-document.querySelector('input[name=prod][value="' + loop.product + '"]').checked = true;
-document.querySelectorAll('input[name=prod]').forEach(function(r){
+/* Le produit se compose de deux choix : la phase, dans la barre haute, et
+   la grandeur mesurée, dans la feuille de réglages. */
+var choice = { phase: loop.info().phase || "Pluie",
+               quantity: loop.info().quantity || "Taux de précipitation" };
+
+function syncProductInputs(){
+  var set = function(name, value){
+    var el = document.querySelector('input[name=' + name + '][value="' + value + '"]');
+    if(el) el.checked = true;
+  };
+  set("phase", choice.phase);
+  set("quantity", choice.quantity);
+  document.querySelectorAll('input[name=quantity]').forEach(function(x){
+    x.closest(".opt").classList.toggle("checked", x.checked);
+  });
+}
+
+async function applyProduct(){
+  var id = C.findProduct(choice.quantity, choice.phase);
+  if(!id) return;
+
+  if(await loop.setProduct(id)){
+    C.Prefs.write({ product:id });
+  } else {
+    /* GeoMet a refusé : on se recale sur ce que la boucle affiche vraiment. */
+    choice.phase    = loop.info().phase;
+    choice.quantity = loop.info().quantity;
+    syncProductInputs();
+    toast("GeoMet ne sert pas la couche « " + id + " ». Retour à "
+          + choice.quantity.toLowerCase() + " — " + choice.phase.toLowerCase() + ".");
+  }
+  if($("#coverage").checked) setCoverage(true);   // la couverture suit la phase
+}
+
+document.querySelectorAll('input[name=phase], input[name=quantity]').forEach(function(r){
   r.onchange = function(e){
-    loop.setProduct(e.target.value);
-    C.Prefs.write({ product:e.target.value });
-    if(coverageLayer){ $("#coverage").checked = false; setCoverage(false); }
+    choice[e.target.name] = e.target.value;
+    applyProduct();
   };
 });
+syncProductInputs();
 
 document.querySelectorAll(".opt input").forEach(function(i){
   var sync = function(){ i.closest(".opt").classList.toggle("checked", i.checked); };

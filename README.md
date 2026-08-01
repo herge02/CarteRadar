@@ -36,8 +36,18 @@ profite donc aux deux versions.
 
 ## Fonctions
 
-- **Produits** : précipitation pluie (`RADAR_1KM_RRAI`, mm/h) et neige
-  (`RADAR_1KM_RSNO`, cm/h), composite 1 km.
+- **Produits** : quatre composites 1 km, croisant deux grandeurs et deux
+  hypothèses de phase. « Pluie » et « neige » désignent la table de conversion
+  appliquée à l'écho, pas ce qui tombe réellement.
+
+  | Grandeur | Pluie | Neige |
+  |---|---|---|
+  | Taux de précipitation | `RADAR_1KM_RRAI` — mm/h | `RADAR_1KM_RSNO` — cm/h |
+  | Réflectivité | `RADAR_1KM_RDBR` — dBZ | `RADAR_1KM_RDBS` — dBZ |
+
+  La liste vit dans `PRODUCTS`, au début de `assets/radar-core.js` : une ligne
+  de plus la fait apparaître dans les deux interfaces. Si GeoMet refuse une
+  couche, la console revient au produit précédent et le dit.
 - **Boucle** : jusqu'à 30 images, soit les trois dernières heures. Arrêt d'une
   seconde et demie sur la dernière image avant de reboucler, comme les boucles
   d'ECCC.

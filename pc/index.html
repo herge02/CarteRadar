@@ -25,10 +25,7 @@
 
   <div class="group">
     <span class="eyebrow">Produit animé</span>
-    <label class="opt"><input type="radio" name="prod" value="RADAR_1KM_RRAI" checked>
-      Précipitation — pluie <span class="unit">mm/h</span></label>
-    <label class="opt"><input type="radio" name="prod" value="RADAR_1KM_RSNO">
-      Précipitation — neige <span class="unit">cm/h</span></label>
+    <div id="prod-list"></div>
     <div class="row" style="margin-top:12px">
       <span class="eyebrow" style="flex:0 0 auto">Opacité</span>
       <input type="range" id="opacity" min="20" max="100" value="78" style="width:96px">
@@ -311,12 +308,54 @@ $("#frames").oninput = function(e){
   }, 400);
 };
 
-document.querySelector('input[name=prod][value="' + loop.product + '"]').checked = true;
+/* La liste des produits est engendrée depuis RadarCore.PRODUCTS, groupée
+   par grandeur mesurée : taux de précipitation, puis réflectivité. */
+(function buildProducts(){
+  var host = $("#prod-list");
+  var groups = {};
+  Object.keys(C.PRODUCTS).forEach(function(id){
+    var q = C.PRODUCTS[id].quantity;
+    (groups[q] = groups[q] || []).push(id);
+  });
+
+  Object.keys(groups).forEach(function(q){
+    var head = document.createElement("div");
+    head.className = "subhead";
+    head.textContent = q;
+    host.appendChild(head);
+
+    groups[q].forEach(function(id){
+      var p = C.PRODUCTS[id];
+      var lab = document.createElement("label");
+      lab.className = "opt";
+      lab.innerHTML = '<input type="radio" name="prod"><span></span><span class="unit"></span>';
+      var input = lab.querySelector("input");
+      input.value = id;
+      input.checked = id === loop.product;
+      lab.querySelectorAll("span")[0].textContent = p.phase;
+      lab.querySelector(".unit").textContent = p.unit;
+      host.appendChild(lab);
+    });
+  });
+})();
+
 document.querySelectorAll('input[name=prod]').forEach(function(r){
-  r.onchange = function(e){
-    loop.setProduct(e.target.value);
-    C.Prefs.write({ product:e.target.value });
-    if(coverageLayer){ $("#coverage").checked = false; setCoverage(false); }
+  r.onchange = async function(e){
+    var wanted = e.target.value;
+    if(await loop.setProduct(wanted)){
+      C.Prefs.write({ product:wanted });
+    } else {
+      /* Refus de GeoMet : la boucle est revenue en arrière, la coche aussi. */
+      var back = document.querySelector('input[name=prod][value="' + loop.product + '"]');
+      if(back) back.checked = true;
+      document.querySelectorAll('input[name=prod]').forEach(function(x){
+        x.closest(".opt").classList.toggle("checked", x.checked);
+      });
+      var now = loop.info();
+      toast("GeoMet ne sert pas la couche « " + wanted + " ». Retour à "
+            + now.quantity.toLowerCase() + " — " + now.phase.toLowerCase() + ".");
+    }
+    if($("#coverage").checked) setCoverage(true);   // la couverture suit la phase
   };
 });
 

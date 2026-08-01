@@ -158,6 +158,13 @@ input[type=range]:focus-visible{ outline:2px solid var(--bone); outline-offset:4
   display:block; margin-bottom:9px;
   padding-bottom:6px; border-bottom:1px solid var(--rule);
 }
+/* Intertitre à l'intérieur d'un groupe : sépare les grandeurs mesurées. */
+.subhead{
+  font-size:11px; color:var(--dim);
+  margin:2px 0 2px; padding-top:6px;
+}
+.subhead:first-child{ padding-top:0 }
+
 .opt{
   display:flex; align-items:center; gap:9px;
   padding:5px 0; cursor:pointer;

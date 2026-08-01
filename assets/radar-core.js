@@ -10,10 +10,25 @@ var TZ     = "America/Toronto";
 var ATTR   = 'Radar © <a href="https://eccc-msc.github.io/open-data/" target="_blank" rel="noopener">ECCC / GeoMet</a>';
 var CARTO  = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
+/*  Les quatre composites 1 km de GeoMet, croisant deux grandeurs et deux
+    hypothèses de phase. Toute l'interface se construit à partir d'ici :
+    ajouter une ligne suffit à faire apparaître le produit des deux côtés.
+    « pluie » et « neige » désignent la table de conversion appliquée à
+    l'écho, pas ce qui tombe réellement.                                  */
 var PRODUCTS = {
-  RADAR_1KM_RRAI: { label: "Pluie", unit: "mm/h", coverage: "RADAR_COVERAGE_RRAI.INV" },
-  RADAR_1KM_RSNO: { label: "Neige", unit: "cm/h", coverage: "RADAR_COVERAGE_RSNO.INV" }
+  RADAR_1KM_RRAI: { quantity:"Taux de précipitation", phase:"Pluie", unit:"mm/h", coverage:"RADAR_COVERAGE_RRAI.INV" },
+  RADAR_1KM_RSNO: { quantity:"Taux de précipitation", phase:"Neige", unit:"cm/h", coverage:"RADAR_COVERAGE_RSNO.INV" },
+  RADAR_1KM_RDBR: { quantity:"Réflectivité",          phase:"Pluie", unit:"dBZ",  coverage:"RADAR_COVERAGE_RRAI.INV" },
+  RADAR_1KM_RDBS: { quantity:"Réflectivité",          phase:"Neige", unit:"dBZ",  coverage:"RADAR_COVERAGE_RSNO.INV" }
 };
+
+/* Retrouve l'identifiant à partir du couple grandeur / phase. */
+function findProduct(quantity, phase){
+  for(var id in PRODUCTS){
+    if(PRODUCTS[id].quantity === quantity && PRODUCTS[id].phase === phase) return id;
+  }
+  return null;
+}
 
 /* GeoMet ne conserve que les trois dernières heures, à six minutes d'écart. */
 var MAX_FRAMES = 30;
@@ -125,7 +140,8 @@ function RadarLoop(map, opts){
 }
 
 RadarLoop.prototype.info = function(){
-  return PRODUCTS[this.product] || { label: this.product, unit: "", coverage: null };
+  return PRODUCTS[this.product] ||
+         { quantity: this.product, phase: "", unit: "", coverage: null };
 };
 
 RadarLoop.prototype._frame = function(date){
@@ -213,10 +229,20 @@ RadarLoop.prototype.setFps = function(v){
   if(this.playing){ this.pause(); this.play(); }
 };
 
-RadarLoop.prototype.setProduct = function(id){
+/*  Toutes les couches annoncées ne sont pas forcément servies : si GeoMet
+    refuse la nouvelle, on revient à la précédente plutôt que de laisser la
+    carte vide. Le rappel `error` a déjà prévenu l'utilisateur.           */
+RadarLoop.prototype.setProduct = async function(id){
+  var previous = this.product;
+  if(id === previous) return true;
+
   this.product = id;
   this.pause();
-  return this.build();
+  if(await this.build()) return true;
+
+  this.product = previous;
+  await this.build();
+  return false;
 };
 
 RadarLoop.prototype.setWanted = function(n){
@@ -311,6 +337,7 @@ global.RadarCore = {
   CARTO: CARTO,
   TZ: TZ,
   PRODUCTS: PRODUCTS,
+  findProduct: findProduct,
   MAX_FRAMES: MAX_FRAMES,
   Prefs: Prefs,
   isoZ: isoZ,
