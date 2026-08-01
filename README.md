@@ -32,10 +32,21 @@ Le fichier `assets/radar-core.js` contient toute la logique météo : lecture de
 l'axe temps dans le `GetCapabilities`, construction des couches WMS, lecture,
 rafraîchissement aux six minutes, `GetFeatureInfo` pour l'intensité au point.
 
-L'axe temps admet les deux écritures de la norme WMS, que GeoMet emploie selon
-le produit : l'intervalle `début/fin/pas` et la liste d'instants séparés par
-des virgules, y compris mêlées dans une même valeur. Les durées ISO 8601 sont
-lues au complet, le `M` valant mois avant le `T` et minutes après.
+L'axe temps est lu sous toutes les formes que la norme WMS autorise, parce que
+GeoMet en emploie plusieurs selon le produit :
+
+- **où le trouver** — `<Dimension name="time">` de la version 1.3.0, ou le
+  couple `<Dimension/>` déclaratif et `<Extent name="time">` de la 1.1.1 ; à
+  défaut, l'attribut `default`, qui donne au moins l'image courante ;
+- **comment le lire** — intervalle `début/fin/pas` ou liste d'instants séparés
+  par des virgules, y compris mêlés dans une même valeur ;
+- **les durées** ISO 8601 au complet, le `M` valant mois avant le `T` et
+  minutes après.
+
+Quand rien de tout cela n'est trouvé, le message d'erreur emporte un portrait
+du document reçu — élément racine, nombre de `Layer`, `Dimension` et `Extent`,
+premiers noms de couches. Un échec d'analyse se distingue ainsi d'une panne du
+service sans avoir à ouvrir les outils de développement.
 Les deux pages ne font qu'y brancher leurs commandes. Une correction du moteur
 profite donc aux deux versions.
 

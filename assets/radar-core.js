@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "4";
+var VERSION = "5";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -84,6 +84,59 @@ function panes(map){
   map.getPane("labels").style.pointerEvents = "none";
 }
 
+/*  Cherche un élément par nom local, que le document soit muni d'espaces de
+    noms ou non, et privilégie celui qui porte name="time".                */
+function pickNamed(xml, tag){
+  var els = xml.getElementsByTagName(tag);
+  if(!els.length) els = xml.getElementsByTagNameNS("*", tag);
+  var first = null;
+  for(var i = 0; i < els.length; i++){
+    if(!first) first = els[i];
+    if((els[i].getAttribute("name") || "").toLowerCase() === "time") return els[i];
+  }
+  return first;
+}
+
+/*  Le WMS a déplacé l'axe temps d'une version à l'autre :
+      1.3.0 — <Dimension name="time" units="ISO8601">valeurs</Dimension>
+      1.1.1 — <Dimension name="time"/> purement déclaratif, les valeurs
+              vivant dans <Extent name="time">valeurs</Extent>
+    MapServer, sur lequel repose GeoMet, sert l'une ou l'autre selon la
+    couche. On accepte les deux, et à défaut l'attribut default, qui donne
+    au moins l'image courante.                                            */
+function timeAxisFrom(xml){
+  var dim = pickNamed(xml, "Dimension");
+  var ext = pickNamed(xml, "Extent");
+
+  var value = (dim && dim.textContent.trim()) || (ext && ext.textContent.trim()) || "";
+  if(value) return value;
+
+  return ((dim && dim.getAttribute("default"))
+       || (ext && ext.getAttribute("default")) || "").trim();
+}
+
+/*  Portrait compact du document reçu, joint au message d'erreur : sans lui,
+    un échec d'analyse ne se distingue pas d'une panne du service.        */
+function describeDoc(xml){
+  var count = function(tag){
+    var a = xml.getElementsByTagName(tag);
+    return a.length || xml.getElementsByTagNameNS("*", tag).length;
+  };
+
+  var names = [], ns = xml.getElementsByTagName("Name");
+  if(!ns.length) ns = xml.getElementsByTagNameNS("*", "Name");
+  for(var i = 0; i < ns.length && names.length < 3; i++){
+    var v = ns[i].textContent.trim();
+    if(v) names.push(v);
+  }
+
+  return (xml.documentElement ? xml.documentElement.nodeName : "?")
+       + " · Layer×" + count("Layer")
+       + " Dimension×" + count("Dimension")
+       + " Extent×" + count("Extent")
+       + (names.length ? " · " + names.join(" ") : "");
+}
+
 /* --------------------------------------------------- axe temps de GeoMet */
 async function fetchTimes(product, wanted){
   var url = GEOMET + "?service=WMS&version=1.3.0&request=GetCapabilities&layer="
@@ -99,14 +152,9 @@ async function fetchTimes(product, wanted){
          || xml.getElementsByTagName("ExceptionText")[0];
   if(exc) throw new Error("refus de GeoMet : " + exc.textContent.trim().slice(0, 120));
 
-  var all = xml.getElementsByTagName("Dimension"), dim = null;
-  for(var i = 0; i < all.length; i++){
-    if((all[i].getAttribute("name") || "").toLowerCase() === "time"){ dim = all[i]; break; }
-  }
-  if(!dim) dim = all[0];
-  if(!dim) throw new Error("couche sans dimension temporelle");
+  var raw = timeAxisFrom(xml);
+  if(!raw) throw new Error("aucun axe temps dans la réponse [" + describeDoc(xml) + "]");
 
-  var raw   = dim.textContent.trim();
   var times = expandTimeDimension(raw, wanted);
   if(!times.length) throw new Error("axe temps illisible : « " + raw.slice(0, 60) + " »");
 
@@ -410,6 +458,8 @@ global.RadarCore = {
   fetchTimes: fetchTimes,
   expandTimeDimension: expandTimeDimension,
   durationMs: durationMs,
+  timeAxisFrom: timeAxisFrom,
+  describeDoc: describeDoc,
   RadarLoop: RadarLoop
 };
 

@@ -12,8 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=4">
-<link rel="stylesheet" href="/assets/pc.css?v=4">
+<link rel="stylesheet" href="/assets/theme.css?v=5">
+<link rel="stylesheet" href="/assets/pc.css?v=5">
 </head>
 <body>
 
@@ -121,7 +121,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=4"></script>
+<script src="/assets/radar-core.js?v=5"></script>
 <script>
 (function(){
 "use strict";
@@ -130,8 +130,9 @@ var C = window.RadarCore;
 var $ = function(s){ return document.querySelector(s); };
 var prefs = C.Prefs.read();
 
-/* Un moteur sans numéro vient forcément d'un cache : il est antérieur à la
-   version 4. Le dire à l'écran évite de chercher la panne du mauvais côté. */
+/* Un moteur sans numéro vient forcément d'un cache : la version est née
+   avec ce dispositif. Le dire à l'écran évite de chercher la panne du
+   mauvais côté. */
 $("#ver").textContent = C.VERSION || "ersion inconnue — vidange du cache à faire";
 
 /* ------------------------------------------------------------------ carte */
