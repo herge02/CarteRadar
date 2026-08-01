@@ -15,8 +15,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css">
-<link rel="stylesheet" href="/assets/mobile.css">
+<link rel="stylesheet" href="/assets/theme.css?v=4">
+<link rel="stylesheet" href="/assets/mobile.css?v=4">
 </head>
 <body>
 
@@ -145,13 +145,14 @@
   <div id="sheet-foot">
     <a class="swap" href="/pc?v=pc">Passer à la vue bureau →</a>
     <p class="hint">Touchez la carte pour lire l'intensité sous le doigt.</p>
+    <p class="hint mono">moteur v<span id="ver">?</span></p>
   </div>
 </aside>
 
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js"></script>
+<script src="/assets/radar-core.js?v=4"></script>
 <script>
 (function(){
 "use strict";
@@ -159,6 +160,10 @@
 var C = window.RadarCore;
 var $ = function(s){ return document.querySelector(s); };
 var prefs = C.Prefs.read();
+
+/* Un moteur sans numéro vient forcément d'un cache : il est antérieur à la
+   version 4. Le dire à l'écran évite de chercher la panne du mauvais côté. */
+$("#ver").textContent = C.VERSION || "ersion inconnue — vidange du cache à faire";
 
 /* ------------------------------------------------------------------ carte */
 var view = prefs.view || { lat:45.65, lng:-73.85, zoom:9 };   // Blainville

@@ -87,6 +87,23 @@ Aucune étape de compilation.
 `vercel.json` active `cleanUrls`, ce qui donne les adresses `/pc` et `/mobile`
 sans le suffixe `.html`.
 
+### Cache
+
+Les pages et les fichiers de `assets/` sont servis en `no-cache` : le
+navigateur les garde, mais revalide avant chaque usage, et reçoit un 304 tant
+que rien n'a changé. Les liens vers `assets/` portent en plus une marque de
+version (`?v=4`).
+
+Cette prudence a une raison. Un `stale-while-revalidate` généreux sur les
+assets a déjà servi un `radar-core.js` périmé avec un HTML à jour : les deux
+fichiers d'un même déploiement se désynchronisent, et la panne qui en résulte
+ressemble à une panne du service. Le pied du tiroir, comme celui de la feuille
+de réglages, affiche donc **le numéro de version du moteur** — s'il ne
+correspond pas au dernier déploiement, c'est le cache, pas GeoMet.
+
+À chaque modification d'un fichier de `assets/`, incrémenter `VERSION` en tête
+de `radar-core.js` et la marque `?v=` dans les deux pages.
+
 Essai local, sans Vercel :
 
 ```sh

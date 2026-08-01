@@ -5,6 +5,11 @@
 (function (global) {
 "use strict";
 
+/*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
+    coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
+    correspond pas au dernier déploiement, c'est le cache, pas le service. */
+var VERSION = "4";
+
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
 var ATTR   = 'Radar © <a href="https://eccc-msc.github.io/open-data/" target="_blank" rel="noopener">ECCC / GeoMet</a>';
@@ -389,6 +394,7 @@ RadarLoop.prototype.valueAt = async function(latlng){
 
 /* --------------------------------------------------------------- exports */
 global.RadarCore = {
+  VERSION: VERSION,
   GEOMET: GEOMET,
   ATTR: ATTR,
   CARTO: CARTO,
