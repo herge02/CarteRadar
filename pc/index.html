@@ -12,8 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=13">
-<link rel="stylesheet" href="/assets/pc.css?v=13">
+<link rel="stylesheet" href="/assets/theme.css?v=14">
+<link rel="stylesheet" href="/assets/pc.css?v=14">
 </head>
 <body>
 
@@ -46,8 +46,17 @@
       <input type="range" id="planes-radius" min="20" max="250" step="10" value="120" style="width:88px">
       <span class="val mono" id="planes-radius-val">120 NM</span>
     </div>
-    <label class="opt" id="planes-follow-row" hidden><input type="checkbox" id="planes-follow">
-      Suivre la boucle</label>
+    <div id="planes-mode-row" hidden>
+      <label class="opt"><input type="radio" name="planes-mode" value="direct" checked> En direct</label>
+      <label class="opt"><input type="radio" name="planes-mode" value="radar"> Lié à l'image radar</label>
+      <label class="opt"><input type="radio" name="planes-mode" value="propre"> Animation propre</label>
+    </div>
+    <div class="row" id="planes-step-row" hidden style="margin-top:8px">
+      <span class="eyebrow" style="flex:0 0 auto">Pas</span>
+      <input type="range" id="planes-step" min="1" max="60" step="1" value="5" style="width:88px">
+      <span class="val mono" id="planes-step-val">5 s</span>
+    </div>
+    <div id="planes-clock" class="hint mono" hidden></div>
     <div class="row" id="planes-source-row" hidden style="margin-top:8px">
       <span class="eyebrow" style="flex:0 0 auto">Source</span>
       <select id="planes-source" aria-label="Source du trafic aérien">
@@ -158,7 +167,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=13"></script>
+<script src="/assets/radar-core.js?v=14"></script>
 <script>
 (function(){
 "use strict";
@@ -227,7 +236,8 @@ var loop = new C.RadarLoop(map, {
 /* ------------------------------------------------------------ trafic aérien */
 var planes = new C.Aircraft(map, {
   radius: prefs.planesRadius || 120,
-  follow: !!prefs.planesFollow,
+  mode: prefs.planesMode || (prefs.planesFollow ? 'radar' : 'direct'),
+  step: (prefs.planesStep || 5) * 1000,
   source: prefs.planesSource,
   on: {
     status: function(msg){
@@ -237,10 +247,18 @@ var planes = new C.Aircraft(map, {
         : msg;
       updatePlaneSpan();
     },
-    count : function(n){ planeCount = n; }
+    count : function(n, ms){
+      planeCount = n;
+      /*  L'horloge bat cinq fois par seconde en mode propre : on ne réécrit
+          le texte que lorsqu'il change réellement de seconde.            */
+      if(ms && planeMode !== "direct"){
+        var txt = n + " appareils · " + C.clock(new Date(ms), { second:"2-digit" });
+        if(txt !== dernierCadran){ dernierCadran = txt; $("#planes-clock").textContent = txt; }
+      }
+    }
   }
 });
-var planeCount = 0;
+var planeCount = 0, dernierCadran = '';
 
 function buildAltLegend(){
   var host = $("#alt-legend");
@@ -258,7 +276,7 @@ buildAltLegend();
 
 $("#planes-on").onchange = function(e){
   $("#planes-radius-row").hidden = !e.target.checked;
-  $("#planes-follow-row").hidden = !e.target.checked;
+  $("#planes-mode-row").hidden = !e.target.checked;
   $("#planes-source-row").hidden = !e.target.checked;
   $("#planes-mem-row").hidden = !e.target.checked;
   updatePlaneSpan();
@@ -266,6 +284,7 @@ $("#planes-on").onchange = function(e){
   C.Prefs.write({ planesOn: e.target.checked });
   if(e.target.checked){
     planes.enable();
+    planes.setMode(planeMode);
     $("#planes-status").textContent = "Interrogation de " + planes.sourceLabel() + "…";
   } else {
     planes.disable();
@@ -287,14 +306,41 @@ $("#planes-radius").oninput = function(e){
 };
 
 /* Un déplacement de carte change le centre interrogé. */
-$("#planes-follow").checked = planes.follow;
-$("#planes-follow").onchange = function(e){
-  planes.setFollow(e.target.checked);
-  C.Prefs.write({ planesFollow: e.target.checked });
+/*  Trois façons de situer la flotte dans le temps. « Animation propre » lui
+    donne son horloge : elle avance par petits pas d'un temps enregistré,
+    indépendamment de la boucle radar, ce qui laisse voir les trajectoires
+    se dérouler au lieu de sauter de six minutes en six minutes.         */
+var planeMode = prefs.planesMode || (prefs.planesFollow ? "radar" : "direct");
+var planeStep = prefs.planesStep || 5;
+
+function syncPlaneMode(){
+  var r = document.querySelector('input[name=planes-mode][value="' + planeMode + '"]');
+  if(r) r.checked = true;
+  document.querySelectorAll('input[name=planes-mode]').forEach(function(x){
+    x.closest(".opt").classList.toggle("checked", x.checked);
+  });
+  var actif = $("#planes-on").checked;
+  $("#planes-step-row").hidden  = !actif || planeMode !== "propre";
+  $("#planes-clock").hidden     = !actif || planeMode === "direct";
   updatePlaneSpan();
-  $("#planes-status").textContent = e.target.checked
-    ? "Les avions suivent la boucle : rien avant l'ouverture de la page."
-    : "Les avions restent en direct, quelle que soit l'image affichée.";
+}
+
+document.querySelectorAll('input[name=planes-mode]').forEach(function(r){
+  r.onchange = function(e){
+    planeMode = e.target.value;
+    C.Prefs.write({ planesMode: planeMode });
+    planes.setMode(planeMode);
+    syncPlaneMode();
+  };
+});
+
+$("#planes-step").value = planeStep;
+$("#planes-step-val").textContent = planeStep + " s";
+$("#planes-step").oninput = function(e){
+  planeStep = +e.target.value;
+  $("#planes-step-val").textContent = planeStep + " s";
+  planes.setStep(planeStep * 1000);
+  C.Prefs.write({ planesStep: planeStep });
 };
 
 $("#planes-source").value = planes.source;
@@ -314,7 +360,7 @@ $("#planes-forget").onclick = function(){ planes.forget(); updatePlaneSpan(); };
     accompagnée de rien : mieux vaut le montrer que le laisser deviner.   */
 function updatePlaneSpan(){
   var bar = $("#planes-span");
-  var c   = planes.enabled && planes.follow ? planes.coverage() : null;
+  var c   = (planes.enabled && planes.mode === "radar") ? planes.coverage() : null;
   var n   = loop.times.length;
 
   if(!c || n < 2){ bar.style.display = "none"; return; }
@@ -343,6 +389,15 @@ map.on("moveend", function(){
   clearTimeout(histDebounce);
   histDebounce = setTimeout(function(){ planes.syncHistory(); }, 1200);
 });
+
+/*  Poignée de diagnostic. Cette console expose déjà sa version et la cause de
+    ses erreurs ; de quoi inspecter son état depuis la console du navigateur
+    va dans le même sens — et évite d'avoir à instrumenter le code pour le
+    mettre à l'épreuve.
+        carteradar.planes.coverage()   étendue de l'historique
+        carteradar.loop.times.length   images de la boucle
+        carteradar.version             version du moteur                  */
+window.carteradar = { loop: loop, planes: planes, core: C, version: C.VERSION };
 
 var PLAY  = "M3 1.5 14 8 3 14.5z";
 var PAUSE = "M3 2h4v12H3zM9 2h4v12H9z";
@@ -759,6 +814,7 @@ document.addEventListener("visibilitychange", function(){
   onTracks(loop.tracks);
   saveTracks();
   if(prefs.planesOn){ $("#planes-on").checked = true; $("#planes-on").dispatchEvent(new Event("change")); }
+  syncPlaneMode();
   if(loop.times.length > 1) setTimeout(function(){ loop.play(); }, 1200);
 })();
 

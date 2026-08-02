@@ -104,12 +104,24 @@ profite donc aux deux versions.
   leur cap et colorés par bande d'altitude. La source est un flux ADS-B
   communautaire — `adsb.lol`, sans clé ni compte — **étrangère à GeoMet**.
 
-  Deux modes. **En direct** par défaut : la flotte affichée est celle de
-  maintenant, quelle que soit l'image radar sous elle. **Suivre la boucle** :
-  les décalages sont appariés, l'image d'il y a trente minutes montrant les
-  avions d'il y a trente minutes. Ce second mode ne peut rien montrer avant
-  l'ouverture de la page — la source ne diffuse que l'instant présent, et
-  rien n'est inventé pour combler.
+  Trois façons de les situer dans le temps :
+
+  - **En direct** — la flotte de maintenant, quelle que soit l'image radar.
+  - **Lié à l'image radar** — les décalages sont appariés : l'image d'il y a
+    trente minutes montre les avions d'il y a trente minutes. La boucle
+    avançant par bonds de six minutes, les appareils sautent d'autant.
+  - **Animation propre** — les avions reçoivent leur propre horloge, qui
+    parcourt l'historique par pas réglables, cinq secondes par défaut,
+    indépendamment du radar. C'est le mode qui laisse voir les trajectoires
+    se dérouler.
+
+  Ce dernier mode repose sur une **interpolation** : la collecte ne relève
+  qu'une position par minute, un pas de cinq secondes n'aurait donc rien à
+  montrer. Les positions intermédiaires sont calculées entre les deux relevés
+  qui les encadrent — le cap sur l'écart replié, pour que le passage de 350°
+  à 10° emprunte le chemin court. Au-delà de trois minutes entre deux
+  relevés, l'appareil a probablement quitté la zone : rien n'est interpolé,
+  car ce serait tracer une droite à travers le vide.
 
   Les relevés sont pris toutes les 15 secondes, jamais en arrière-plan. Deux
   sources sont proposées, `adsb.lol` et `airplanes.live` : si l'une flanche,
@@ -208,6 +220,17 @@ reste fonctionne.
 
 - `/?v=pc` ou `/?v=mobile` — impose la version et la mémorise.
 - Le lien en bas du tiroir, ou de la feuille de réglages, fait la bascule.
+
+## Diagnostic
+
+La console expose sa version au pied du tiroir, la cause exacte de ses échecs
+dans ses messages, et une poignée dans la console du navigateur :
+
+```js
+carteradar.version              // version du moteur
+carteradar.planes.coverage()    // étendue de l'historique en mémoire
+carteradar.loop.times.length    // images de la boucle
+```
 
 ## Couleur
 

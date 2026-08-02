@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "13";
+var VERSION = "14";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -904,11 +904,22 @@ function Aircraft(map, opts){
   this.saveTimer= null;
 
   this.enabled  = false;
-  /*  En direct par défaut : la flotte montrée est celle de maintenant, quelle
-      que soit l'image radar affichée. Le suivi de boucle apparie les
-      décalages, mais fait disparaître les avions dès qu'on rejoue le passé,
-      faute de relevés antérieurs à l'ouverture de la page.               */
-  this.follow   = !!opts.follow;
+
+  /*  Trois façons de situer la flotte dans le temps :
+        « direct » — toujours maintenant, quelle que soit l'image radar ;
+        « radar »  — appariée à l'image affichée, donc par bonds de six
+                     minutes, ce qui montre mal le déplacement ;
+        « propre » — horloge indépendante, avançant par petits pas, pour
+                     voir les trajectoires se dérouler.                   */
+  this.mode     = opts.mode || (opts.follow ? "radar" : "direct");
+  this.step     = opts.step || 5000;    // temps enregistré gagné par battement
+  this.tickMs   = opts.tickMs || 200;   // cinq battements par seconde
+  this.cursor   = null;                 // instant courant, mode « propre »
+  this.anim     = null;
+
+  /*  Au-delà de cet écart entre deux relevés, l'appareil a probablement
+      quitté la zone : interpoler tracerait une droite à travers le vide.  */
+  this.gapMax   = opts.gapMax || 180000;
   this.lastFrame  = null;
   this.lastNewest = null;
   this.buffer   = {};     // identifiant → relevés datés
@@ -951,6 +962,7 @@ Aircraft.prototype.enable = async function(){
 
 Aircraft.prototype.disable = function(){
   this.enabled = false;
+  this.stopAnim();
   clearInterval(this.timer);
   clearInterval(this.saveTimer);
   this.timer = this.saveTimer = null;
@@ -1046,6 +1058,59 @@ Aircraft.prototype.sampleAt = function(id, ms){
   return delta <= this.tolerance ? best : null;
 };
 
+function lerp(a, b, f){
+  if(a === null || a === undefined) return b;
+  if(b === null || b === undefined) return a;
+  return a + (b - a) * f;
+}
+
+/*  Un cap se boucle à 360 : entre 350 et 10 degrés, le chemin court passe
+    par zéro, pas par 180. On interpole donc sur l'écart replié.         */
+function lerpAngle(a, b, f){
+  if(a === null || a === undefined) return b;
+  if(b === null || b === undefined) return a;
+  var d = ((b - a + 540) % 360) - 180;
+  return (a + d * f + 360) % 360;
+}
+
+/*  Position à un instant quelconque, interpolée entre les deux relevés qui
+    l'encadrent. Sans cela, une horloge au pas de cinq secondes n'aurait
+    rien à montrer : la collecte ne relève qu'une fois par minute.       */
+Aircraft.prototype.stateAt = function(id, ms){
+  var b = this.buffer[id];
+  if(!b || !b.length) return null;
+
+  var avant = null, apres = null;
+  for(var i = 0; i < b.length; i++){
+    if(b[i].t <= ms) avant = b[i];
+    if(b[i].t >= ms){ apres = b[i]; break; }
+  }
+
+  /* Hors de la plage relevée : on tolère un léger débord, pas davantage. */
+  if(!avant && !apres) return null;
+  if(!avant) return (apres.t - ms) <= this.tolerance ? apres : null;
+  if(!apres) return (ms - avant.t) <= this.tolerance ? avant : null;
+  if(avant === apres || apres.t === avant.t) return avant;
+
+  var ecart = apres.t - avant.t;
+  if(ecart > this.gapMax){
+    /* Trou trop large : on s'accroche au relevé voisin, sans inventer. */
+    if(ms - avant.t <= this.tolerance) return avant;
+    if(apres.t - ms <= this.tolerance) return apres;
+    return null;
+  }
+
+  var f = (ms - avant.t) / ecart;
+  return {
+    t   : ms,
+    lat : lerp(avant.lat, apres.lat, f),
+    lon : lerp(avant.lon, apres.lon, f),
+    alt : lerp(avant.alt, apres.alt, f),
+    spd : lerp(avant.spd, apres.spd, f),
+    trk : lerpAngle(avant.trk, apres.trk, f)
+  };
+};
+
 Aircraft.prototype.icon = function(s){
   var band = altBand(s.alt);
   return L.divIcon({
@@ -1074,14 +1139,11 @@ Aircraft.prototype.render = function(frameTime, newestTime){
   this.lastFrame  = frameTime  || this.lastFrame;
   this.lastNewest = newestTime || this.lastNewest;
 
-  var lag = (this.follow && this.lastNewest && this.lastFrame)
-          ? Math.max(0, this.lastNewest.getTime() - this.lastFrame.getTime())
-          : 0;
-  var ms = Date.now() - lag;
+  var ms = this.clockAt();
   var shown = {}, n = 0, self = this;
 
   for(var id in this.buffer){
-    var s = this.sampleAt(id, ms);
+    var s = this.stateAt(id, ms);
     if(!s) continue;
     shown[id] = true;
     n++;
@@ -1089,12 +1151,27 @@ Aircraft.prototype.render = function(frameTime, newestTime){
     var m = this.markers[id];
     if(m){
       m.setLatLng([s.lat, s.lon]);
-      m.setIcon(this.icon(s));
+      /*  Reconstruire l'icône à chaque battement coûterait cher : cinq fois
+          par seconde, sur des centaines d'appareils. On ne touche donc que
+          la rotation, et la couleur seulement au changement de bande.    */
+      var band = altBand(s.alt);
+      if(m._svg){
+        m._svg.style.transform = "rotate(" + (s.trk || 0) + "deg)";
+        if(m._band !== band.color){
+          m._svg.firstChild.setAttribute("fill", band.color);
+          m._band = band.color;
+        }
+      } else {
+        m.setIcon(this.icon(s));
+      }
     } else {
       m = L.marker([s.lat, s.lon], { icon:this.icon(s), pane:"planes", keyboard:false });
       m.bindTooltip(this.describe(id, s), { direction:"top", offset:[0,-8], className:"plane-tip" });
       this.markers[id] = m;
       this.layer.addLayer(m);
+      var el = m.getElement();
+      m._svg  = el ? el.querySelector("svg") : null;
+      m._band = altBand(s.alt).color;
     }
     m.setTooltipContent(this.describe(id, s));
   }
@@ -1104,7 +1181,7 @@ Aircraft.prototype.render = function(frameTime, newestTime){
     this.layer.removeLayer(this.markers[k]);
     delete this.markers[k];
   }
-  this.on.count(n);
+  this.on.count(n, ms);
 };
 
 Aircraft.prototype.describe = function(id, s){
@@ -1230,6 +1307,52 @@ Aircraft.prototype.forget = async function(){
   this.on.status("Mémoire du trafic effacée.");
 };
 
+/*  Instant auquel la flotte est montrée, selon le mode retenu. */
+Aircraft.prototype.clockAt = function(){
+  if(this.mode === "propre" && this.cursor) return this.cursor;
+
+  var lag = (this.mode === "radar" && this.lastNewest && this.lastFrame)
+          ? Math.max(0, this.lastNewest.getTime() - this.lastFrame.getTime())
+          : 0;
+  return Date.now() - lag;
+};
+
+/*  Horloge indépendante : elle parcourt l'étendue enregistrée par pas de
+    `step` millisecondes de temps réel, et reboucle au début.            */
+Aircraft.prototype.startAnim = function(){
+  this.stopAnim();
+  var self = this, c = this.coverage();
+  if(!c) return false;
+
+  if(!this.cursor || this.cursor < c.from.getTime() || this.cursor > c.to.getTime()){
+    this.cursor = c.from.getTime();
+  }
+
+  this.anim = setInterval(function(){
+    if(document.hidden) return;
+    var e = self.coverage();
+    if(!e) return;
+    self.cursor += self.step;
+    if(self.cursor > e.to.getTime()) self.cursor = e.from.getTime();
+    self.render();
+  }, this.tickMs);
+  return true;
+};
+
+Aircraft.prototype.stopAnim = function(){
+  clearInterval(this.anim);
+  this.anim = null;
+};
+
+Aircraft.prototype.setMode = function(m){
+  this.mode = m;
+  if(m === "propre") this.startAnim();
+  else { this.stopAnim(); this.cursor = null; }
+  this.render();
+};
+
+Aircraft.prototype.setStep = function(ms){ this.step = ms; };
+
 Aircraft.prototype.setRadius = function(nm){ this.radius = nm; if(this.enabled) this.poll(); };
 
 Aircraft.prototype.setFollow = function(on){ this.follow = !!on; this.render(); };
@@ -1254,6 +1377,7 @@ global.RadarCore = {
   scanLayers: scanLayers,
   remember: remember,
   guessUnit: guessUnit,
+  lerpAngle: lerpAngle,
   metaFor: metaFor,
   Track: Track,
   expandTimeDimension: expandTimeDimension,
