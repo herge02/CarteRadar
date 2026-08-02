@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "6";
+var VERSION = "7";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -149,6 +149,65 @@ function describeDoc(xml){
        + (names.length ? " · " + names.join(" ") : "");
 }
 
+/* ====================================================== catalogue GeoMet ==
+   Le GetCapabilities complet est la seule liste faisant foi des couches du
+   service. Il pèse plusieurs mégaoctets : on le parcourt en texte plutôt
+   que d'en construire un arbre DOM entier, et on le garde en mémoire pour
+   la durée de la session.                                                */
+
+var catalogue = null;
+
+/*  Découpe sur « <Layer » : chaque tronçon porte le Name et le Title de sa
+    couche, et s'arrête à la couche suivante — les dimensions d'une fille ne
+    débordent donc pas sur sa mère. « </Layer> » ne contient pas « <Layer ».  */
+function scanLayers(text){
+  var out = [], seen = {}, chunks = text.split("<Layer");
+
+  for(var i = 1; i < chunks.length; i++){
+    var c = chunks[i];
+    var n = /<(?:\w+:)?Name>([^<]+)<\/(?:\w+:)?Name>/.exec(c);
+    if(!n) continue;
+
+    var name = n[1].trim();
+    if(!name || seen[name]) continue;
+    seen[name] = true;
+
+    var t = /<(?:\w+:)?Title>([^<]*)<\/(?:\w+:)?Title>/.exec(c);
+    out.push({
+      name : name,
+      title: t ? t[1].trim() : "",
+      time : /<(?:\w+:)?(?:Dimension|Extent)[^>]*name\s*=\s*"time"/i.test(c)
+    });
+  }
+  return out;
+}
+
+async function fetchCatalogue(){
+  if(catalogue) return catalogue;
+
+  var res = await fetch(GEOMET + "?service=WMS&version=1.3.0&request=GetCapabilities");
+  if(!res.ok) throw new Error("GetCapabilities " + res.status);
+
+  var text = await res.text();
+  var xml  = new DOMParser().parseFromString(text.slice(0, 4000), "text/xml");
+  var exc  = pickAny(xml, "ServiceException");
+  if(exc) throw new Error("refus de GeoMet : " + exc.textContent.trim().slice(0, 120));
+
+  catalogue = scanLayers(text);
+  if(!catalogue.length){ catalogue = null; throw new Error("aucune couche lisible dans la réponse"); }
+  return catalogue;
+}
+
+/* Filtre insensible à la casse, sur l'identifiant comme sur l'intitulé. */
+function searchCatalogue(list, needle){
+  needle = (needle || "").trim().toLowerCase();
+  if(!needle) return list;
+  return list.filter(function(l){
+    return l.name.toLowerCase().indexOf(needle) !== -1
+        || l.title.toLowerCase().indexOf(needle) !== -1;
+  });
+}
+
 /* --------------------------------------------------- axe temps de GeoMet */
 async function fetchTimes(product, wanted){
   var url = GEOMET + "?service=WMS&version=1.3.0&request=GetCapabilities&layer="
@@ -263,8 +322,28 @@ function RadarLoop(map, opts){
   }, opts.on || {});
 }
 
+/*  Couches choisies dans le catalogue : hors de PRODUCTS, qui ne contient que
+    les produits vérifiés et outillés, mais connues de info() pour que
+    l'intitulé et l'unité s'affichent correctement.                        */
+var ADHOC = {};
+
+function remember(id, meta){
+  ADHOC[id] = {
+    quantity: (meta && meta.title) || id,
+    phase   : "",
+    unit    : (meta && meta.unit) || guessUnit(meta && meta.title),
+    coverage: null
+  };
+}
+
+/* L'intitulé de GeoMet porte son unité entre crochets : « … [dBZ] ». */
+function guessUnit(title){
+  var m = /\[([^\]]{1,12})\]\s*$/.exec((title || "").trim());
+  return m ? m[1] : "";
+}
+
 RadarLoop.prototype.info = function(){
-  return PRODUCTS[this.product] ||
+  return PRODUCTS[this.product] || ADHOC[this.product] ||
          { quantity: this.product, phase: "", unit: "", coverage: null };
 };
 
@@ -473,6 +552,11 @@ global.RadarCore = {
   basemaps: basemaps,
   panes: panes,
   fetchTimes: fetchTimes,
+  fetchCatalogue: fetchCatalogue,
+  searchCatalogue: searchCatalogue,
+  scanLayers: scanLayers,
+  remember: remember,
+  guessUnit: guessUnit,
   expandTimeDimension: expandTimeDimension,
   durationMs: durationMs,
   timeAxisFrom: timeAxisFrom,

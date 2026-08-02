@@ -74,9 +74,21 @@ profite donc aux deux versions.
   ajoutées sans rebâtir la pile, et les plus vieilles sont retirées.
 - **Lecture au point** : un clic ou une touche donne l'intensité sous le
   curseur, à l'image affichée.
-- **Couches libres** : n'importe quel identifiant de couche GeoMet peut être
-  ajouté à la main, par exemple `HRDPS.CONTINENTAL_PR`. La liste complète est
-  dans le `GetCapabilities` de `geo.weather.gc.ca/geomet`.
+- **Catalogue** : la console interroge le `GetCapabilities` complet et liste
+  les couches réellement servies, filtrées par identifiant ou par intitulé.
+  Celles qui portent un axe temps sont marquées d'un ▶ et s'animent d'un clic ;
+  les autres se posent en couche fixe. L'unité est tirée de l'intitulé, que
+  GeoMet termine par des crochets — « … [dBZ] ».
+
+  Le document pèse lourd : il n'est demandé qu'à la demande explicite, puis
+  gardé en mémoire pour la session. Il est parcouru en texte, sans construire
+  d'arbre DOM, pour rester tenable sur téléphone.
+
+  C'est la seule liste faisant foi. Un annuaire tiers qui republie GeoMet ne
+  l'est pas — voir la note sur `PRODUCTS`.
+
+- **Couches libres** : un identifiant peut aussi être saisi à la main, par
+  exemple `HRDPS.CONTINENTAL_PR`.
 - **Mémoire** : produit, opacité, vitesse, fond de carte et dernière position
   de la carte sont conservés dans le navigateur.
 - **Économie** : la lecture s'arrête quand l'onglet passe en arrière-plan. La

@@ -15,8 +15,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=6">
-<link rel="stylesheet" href="/assets/mobile.css?v=6">
+<link rel="stylesheet" href="/assets/theme.css?v=7">
+<link rel="stylesheet" href="/assets/mobile.css?v=7">
 </head>
 <body>
 
@@ -128,7 +128,20 @@
   </div>
 
   <div class="group">
-    <span class="eyebrow">Ajouter une couche GeoMet</span>
+    <span class="eyebrow">Catalogue GeoMet</span>
+    <div class="field">
+      <input type="text" id="cat-filter" value="RADAR"
+             spellcheck="false" autocapitalize="characters" autocorrect="off"
+             aria-label="Filtrer les couches du catalogue">
+      <button id="cat-load">Chercher</button>
+    </div>
+    <p class="hint" id="cat-status">Interroge le service et liste ses couches.
+      Le catalogue pèse lourd : à éviter sur données cellulaires.</p>
+    <div id="cat-list"></div>
+  </div>
+
+  <div class="group">
+    <span class="eyebrow">Ajouter une couche à la main</span>
     <div class="field">
       <input type="text" id="custom-id" placeholder="ex. HRDPS.CONTINENTAL_PR"
              spellcheck="false" autocapitalize="off" autocorrect="off">
@@ -147,7 +160,7 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=6"></script>
+<script src="/assets/radar-core.js?v=7"></script>
 <script>
 (function(){
 "use strict";
@@ -446,6 +459,67 @@ function addCustom(id){
 $("#custom-add").onclick = function(){ addCustom($("#custom-id").value); };
 $("#custom-id").addEventListener("keydown", function(e){
   if(e.key === "Enter") addCustom(e.target.value);
+});
+
+/* ------------------------------------------------------------- catalogue */
+/*  Le navigateur atteint GeoMet ; c'est donc lui qui dresse la liste des
+    couches réellement servies. Une couche munie d'un axe temps peut être
+    animée comme les produits, les autres se posent en couche fixe.       */
+async function loadCatalogue(){
+  $("#cat-status").textContent = "Interrogation du service…";
+  $("#cat-load").disabled = true;
+
+  var list;
+  try { list = await C.fetchCatalogue(); }
+  catch(e){
+    $("#cat-status").textContent = "Catalogue illisible : " + e.message;
+    $("#cat-load").disabled = false;
+    return;
+  }
+  $("#cat-load").disabled = false;
+  renderCatalogue(list);
+}
+
+function renderCatalogue(list){
+  var found = C.searchCatalogue(list, $("#cat-filter").value);
+  var host  = $("#cat-list");
+  host.textContent = "";
+
+  $("#cat-status").textContent = found.length
+    ? found.length + " couche" + (found.length > 1 ? "s" : "") + " sur "
+      + list.length + " au catalogue" + (found.length > 60 ? ", 60 affichées" : "")
+    : "Aucune couche ne correspond, sur " + list.length + " au catalogue.";
+
+  found.slice(0, 60).forEach(function(l){
+    var row = document.createElement("button");
+    row.className = "cat-row" + (l.time ? " anim" : "");
+    row.type = "button";
+    row.innerHTML = '<span class="n mono"></span><span class="t"></span>';
+    row.querySelector(".n").textContent = l.name;
+    row.querySelector(".t").textContent = l.title || (l.time ? "animable" : "couche fixe");
+    row.onclick = function(){ useCatalogueLayer(l); };
+    host.appendChild(row);
+  });
+}
+
+async function useCatalogueLayer(l){
+  if(!l.time){ addCustom(l.name); toast("« " + l.name + " » posée en couche fixe."); return; }
+
+  C.remember(l.name, l);
+  if(await loop.setProduct(l.name)){
+    C.Prefs.write({ product:l.name });
+    $("#legend-img").src = loop.legendUrl();
+    openSheet(false);
+    toast("Animation de « " + l.name + " »" + (l.title ? " — " + l.title : "") + ".");
+  } else {
+    toast("« " + l.name + " » indisponible — "
+          + (loop.lastError ? loop.lastError.message.replace(/\.+$/, "") : "cause inconnue") + ".");
+  }
+}
+
+$("#cat-load").onclick = loadCatalogue;
+$("#cat-filter").addEventListener("keydown", function(e){
+  if(e.key === "Enter"){ e.target.blur(); loadCatalogue(); }
 });
 
 /* --------------------------------------------------------------- légende */

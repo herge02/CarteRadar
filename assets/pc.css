@@ -212,6 +212,24 @@ input[type=range]:focus-visible{ outline:2px solid var(--bone); outline-offset:4
 
 .hint{ font-size:11px; color:var(--dimmer); line-height:1.45; margin-top:7px }
 
+/* ------------------------------------------------------ liste du catalogue */
+#cat-list{ max-height:280px; overflow-y:auto; margin-top:8px }
+#cat-list:not(:empty){ border-top:1px solid var(--rule) }
+
+.cat-row{
+  display:block; width:100%; text-align:left;
+  background:none; border:0; border-bottom:1px solid var(--rule);
+  padding:7px 2px; cursor:pointer; font-family:inherit;
+}
+.cat-row:hover{ background:var(--panel-2) }
+.cat-row .n{ display:block; font-size:11px; color:var(--dim) }
+.cat-row .t{ display:block; font-size:10.5px; color:var(--dimmer); line-height:1.35; margin-top:2px }
+/* Une couche munie d'un axe temps peut être animée : elle se signale. */
+.cat-row.anim .n{ color:var(--bone) }
+.cat-row.anim .n::after{
+  content:"▶"; font-size:8px; margin-left:6px; color:var(--live); vertical-align:1px;
+}
+
 .chip{
   display:flex; align-items:center; gap:8px;
   background:var(--ink);
