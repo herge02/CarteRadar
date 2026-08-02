@@ -15,26 +15,20 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=7">
-<link rel="stylesheet" href="/assets/mobile.css?v=7">
+<link rel="stylesheet" href="/assets/theme.css?v=8">
+<link rel="stylesheet" href="/assets/mobile.css?v=8">
 </head>
 <body>
 
 <div id="app">
 
   <header id="top">
-    <div id="prod" role="radiogroup" aria-label="Phase supposée">
-      <label>
-        <input type="radio" name="phase" value="Pluie" checked>
-        <span>Pluie</span>
-      </label>
-      <label>
-        <input type="radio" name="phase" value="Neige">
-        <span>Neige</span>
-      </label>
-    </div>
+    <button id="stack-btn" aria-label="Couches animées">
+      <span id="stack-count" class="mono">0</span>
+      <span id="stack-names"></span>
+    </button>
 
-    <button class="icon-btn" id="legend-btn" aria-label="Échelle de couleurs" aria-pressed="false">
+    <button class="icon-btn" id="legend-btn" aria-label="Échelles de couleurs" aria-pressed="false">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2h14v3H1zm0 4.5h14v3H1zM1 11h14v3H1z"/></svg>
     </button>
     <button class="icon-btn" id="sheet-btn" aria-label="Réglages et couches" aria-expanded="false">
@@ -47,12 +41,8 @@
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0v2.1A6 6 0 0 0 2.1 8H0v1.6h2.1A6 6 0 0 0 8 15.5V16h1.6v-.5A6 6 0 0 0 15.5 9.6H16V8h-.5A6 6 0 0 0 9.6 2.1V0zm.8 3.6A4.4 4.4 0 1 1 4.4 8 4.4 4.4 0 0 1 8.8 3.6zm0 2.2A2.2 2.2 0 1 0 11 8a2.2 2.2 0 0 0-2.2-2.2z"/></svg>
     </button>
 
-    <div id="legend"><img id="legend-img" alt="Échelle de couleurs du produit affiché"></div>
-
-    <div id="readout">
-      <div class="v" id="readout-v">—</div>
-      <div class="c" id="readout-c"></div>
-    </div>
+    <div id="legend"></div>
+    <div id="readout"></div>
   </div>
 
   <div id="dock">
@@ -86,20 +76,17 @@
 <aside id="sheet" role="dialog" aria-modal="true" aria-label="Réglages et couches">
   <button id="grip" aria-label="Fermer les réglages"></button>
   <h2>Console radar</h2>
-  <div class="sub">ECCC · composite 1 km · MAJ 6 min</div>
+  <div class="sub">ECCC · GeoMet</div>
 
-  <div class="group" id="quantity-group" hidden>
-    <span class="eyebrow">Grandeur mesurée</span>
-    <div id="quantity-list"></div>
+  <div class="group">
+    <span class="eyebrow">Couches animées</span>
+    <div id="track-list"></div>
+    <p class="hint" id="track-empty">Aucune couche animée.</p>
+    <div id="quick"></div>
   </div>
 
   <div class="group">
-    <span class="eyebrow">Image</span>
-    <div class="slider">
-      <span class="eyebrow">Opacité</span>
-      <input type="range" id="opacity" min="20" max="100" value="78">
-      <span class="val" id="opacity-val">78 %</span>
-    </div>
+    <span class="eyebrow">Lecture</span>
     <div class="slider">
       <span class="eyebrow">Vitesse</span>
       <input type="range" id="fps" min="1" max="14" step="1" value="5">
@@ -110,8 +97,8 @@
       <input type="range" id="frames" min="6" max="30" value="15">
       <span class="val" id="frames-val">15</span>
     </div>
-    <p class="hint">GeoMet ne diffuse que les 3 dernières heures, soit 30 images au maximum.
-      Moins d'images, c'est moins de données mobiles.</p>
+    <p class="hint">S'applique à chaque couche animée. Moins d'images, c'est
+      moins de données mobiles — et superposer deux couches double la note.</p>
   </div>
 
   <div class="group">
@@ -145,14 +132,15 @@
     <div class="field">
       <input type="text" id="custom-id" placeholder="ex. HRDPS.CONTINENTAL_PR"
              spellcheck="false" autocapitalize="off" autocorrect="off">
-      <button id="custom-add">Ajouter</button>
+      <button id="custom-add">Fixe</button>
+      <button id="custom-anim">Animée</button>
     </div>
     <div id="custom-list"></div>
   </div>
 
   <div id="sheet-foot">
     <a class="swap" href="/pc?v=pc">Passer à la vue bureau →</a>
-    <p class="hint">Touchez la carte pour lire l'intensité sous le doigt.</p>
+    <p class="hint">Touchez la carte pour lire les valeurs sous le doigt.</p>
     <p class="hint mono">moteur v<span id="ver">?</span></p>
   </div>
 </aside>
@@ -160,7 +148,7 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=7"></script>
+<script src="/assets/radar-core.js?v=8"></script>
 <script>
 (function(){
 "use strict";
@@ -209,24 +197,20 @@ function toast(msg){
 
 /* ------------------------------------------------------------- la boucle */
 /* Sur mobile on charge moins d'images par défaut : chaque image est une
-   requête WMS par tuile visible, et la donnée cellulaire se paie. */
-/* Un produit retiré du catalogue peut survivre dans les préférences : sans
-   ce filtre, la console démarrerait sur une couche que GeoMet refuse. */
-var startProduct = C.PRODUCTS[prefs.product] ? prefs.product : "RADAR_1KM_RRAI";
-
+   série de requêtes WMS, et la donnée cellulaire se paie — d'autant plus
+   qu'une pile de couches multiplie la facture. */
 var loop = new C.RadarLoop(map, {
-  product: startProduct,
   wanted : prefs.wantedMobile || 15,
-  fps    : prefs.fps     || 5,
-  opacity: prefs.opacity != null ? prefs.opacity : 0.78,
+  fps    : prefs.fps || 5,
   on: {
     built    : onBuilt,
     show     : onShow,
     progress : onProgress,
     playing  : onPlaying,
+    tracks   : onTracks,
     error    : function(e){
       $("#stamp-utc").textContent = "GeoMet injoignable";
-      toast("Impossible de joindre GeoMet : " + e.message + ". Nouvel essai dans 60 s.");
+      toast("Impossible de joindre GeoMet : " + e.message);
     }
   }
 });
@@ -246,16 +230,13 @@ function onProgress(ratio){
 }
 
 function onBuilt(l){
-  $("#frames").max = Math.max(6, l.available);
-  $("#scrub").max  = Math.max(0, l.times.length - 1);
+  $("#scrub").max = Math.max(0, l.times.length - 1);
   drawTicks(l.times);
-  $("#legend-img").src = l.legendUrl();
 }
 
 function onShow(d, i, n){
   $("#stamp-time").textContent = C.clock(d, { weekday:"short" });
-  /* Étroit : l'heure UTC abrégée suffit, et l'unité dit quel produit tourne. */
-  $("#stamp-utc").textContent  = C.isoZ(d).slice(11, 16) + " UTC · " + loop.info().unit;
+  $("#stamp-utc").textContent  = C.isoZ(d).slice(11, 16) + " UTC";
   $("#live").classList.toggle("on", i === n - 1);
   if(!scrubbing) $("#scrub").value = i;
 }
@@ -270,6 +251,98 @@ function drawTicks(times){
     t.style.left = (n > 1 ? i / (n - 1) * 100 : 0) + "%";
     host.appendChild(t);
   });
+}
+
+/* ============================================== pile des couches animées */
+
+function saveTracks(){
+  C.Prefs.write({ tracks: loop.tracks.map(function(t){
+    return { id:t.id, opacity:t.opacity, title:t.meta.title || "", unit:t.meta.unit || "" };
+  })});
+}
+
+function onTracks(tracks){
+  var host = $("#track-list");
+  host.textContent = "";
+  $("#track-empty").hidden = tracks.length > 0;
+
+  tracks.forEach(function(t){
+    var row = document.createElement("div");
+    row.className = "track-row";
+    row.innerHTML =
+      '<div class="track-head">' +
+        '<span class="track-id mono"></span>' +
+        '<button class="track-del" aria-label="Retirer cette couche">&times;</button>' +
+      '</div>' +
+      '<div class="track-title"></div>' +
+      '<div class="slider">' +
+        '<span class="eyebrow">Opacité</span>' +
+        '<input type="range" class="track-op" min="0" max="100" step="1">' +
+        '<span class="val track-val"></span>' +
+      '</div>';
+
+    row.querySelector(".track-id").textContent = t.id;
+    row.querySelector(".track-title").textContent =
+      (t.meta.title || t.meta.quantity || "") + (t.unit() ? "  ·  " + t.unit() : "");
+
+    var slider = row.querySelector(".track-op");
+    var val    = row.querySelector(".track-val");
+    slider.value = Math.round(t.opacity * 100);
+    val.textContent = slider.value + " %";
+    slider.oninput = function(e){
+      loop.setTrackOpacity(t.id, +e.target.value / 100);
+      val.textContent = e.target.value + " %";
+      saveTracks();
+    };
+
+    row.querySelector(".track-del").onclick = function(){
+      loop.removeTrack(t.id);
+      saveTracks();
+      refreshLegend();
+      refreshQuick();
+      refreshStackButton();
+    };
+
+    host.appendChild(row);
+  });
+
+  refreshLegend();
+  refreshQuick();
+  refreshStackButton();
+}
+
+function refreshStackButton(){
+  $("#stack-count").textContent = loop.tracks.length;
+  $("#stack-names").textContent = loop.tracks.length
+    ? loop.tracks.map(function(t){ return t.meta.phase || t.id.split(/[._-]/)[0]; }).join(" + ")
+    : "aucune couche";
+}
+
+/* Raccourcis vers les produits vérifiés qui ne sont pas déjà empilés. */
+function refreshQuick(){
+  var host = $("#quick");
+  host.textContent = "";
+  Object.keys(C.PRODUCTS).forEach(function(id){
+    if(loop.find(id)) return;
+    var p = C.PRODUCTS[id];
+    var b = document.createElement("button");
+    b.className = "quick-add";
+    b.type = "button";
+    b.textContent = "+ " + p.phase + " (" + p.unit + ")";
+    b.onclick = function(){ addTrack(id, p); };
+    host.appendChild(b);
+  });
+}
+
+async function addTrack(id, meta){
+  if(loop.find(id)){ toast("« " + id + " » est déjà dans la pile."); return; }
+  if(await loop.addTrack(id, meta, 0.78)){
+    saveTracks();
+    if(!loop.playing && loop.times.length > 1) loop.play();
+  } else {
+    toast("« " + id + " » indisponible — "
+          + (loop.lastError ? loop.lastError.message.replace(/\.+$/, "") : "cause inconnue") + ".");
+  }
 }
 
 /* ------------------------------------------------------------- transport */
@@ -294,14 +367,6 @@ $("#fps").oninput = function(e){
   C.Prefs.write({ fps:loop.fps });
 };
 
-$("#opacity").value = Math.round(loop.opacity * 100);
-$("#opacity-val").textContent = Math.round(loop.opacity * 100) + " %";
-$("#opacity").oninput = function(e){
-  loop.setOpacity(+e.target.value / 100);
-  $("#opacity-val").textContent = e.target.value + " %";
-  C.Prefs.write({ opacity:loop.opacity });
-};
-
 $("#frames").value = loop.wanted;
 $("#frames-val").textContent = loop.wanted;
 var framesDebounce;
@@ -315,77 +380,6 @@ $("#frames").oninput = function(e){
   }, 500);
 };
 
-/* Le produit se compose de deux choix : la phase, dans la barre haute, et
-   la grandeur mesurée, dans la feuille de réglages. */
-var choice = { phase: loop.info().phase || "Pluie",
-               quantity: loop.info().quantity || "Taux de précipitation" };
-
-/*  Les grandeurs sont engendrées depuis RadarCore.PRODUCTS. Tant qu'il n'y
-    en a qu'une, le groupe reste caché : proposer un choix unique n'est pas
-    un choix. Il reparaîtra dès qu'une seconde grandeur sera inscrite.    */
-(function buildQuantities(){
-  var seen = [], units = {};
-  Object.keys(C.PRODUCTS).forEach(function(id){
-    var p = C.PRODUCTS[id];
-    if(seen.indexOf(p.quantity) === -1) seen.push(p.quantity);
-    var u = units[p.quantity] = units[p.quantity] || [];
-    if(u.indexOf(p.unit) === -1) u.push(p.unit);
-  });
-  if(seen.length < 2) return;
-
-  var host = $("#quantity-list");
-  seen.forEach(function(q){
-    var lab = document.createElement("label");
-    lab.className = "opt";
-    lab.innerHTML = '<input type="radio" name="quantity"><span></span><span class="unit"></span>';
-    var input = lab.querySelector("input");
-    input.value = q;
-    input.checked = q === choice.quantity;
-    lab.querySelectorAll("span")[0].textContent = q;
-    lab.querySelector(".unit").textContent = units[q].join(" · ");
-    host.appendChild(lab);
-  });
-  $("#quantity-group").hidden = false;
-})();
-
-function syncProductInputs(){
-  var set = function(name, value){
-    var el = document.querySelector('input[name=' + name + '][value="' + value + '"]');
-    if(el) el.checked = true;
-  };
-  set("phase", choice.phase);
-  set("quantity", choice.quantity);
-  document.querySelectorAll('input[name=quantity]').forEach(function(x){
-    x.closest(".opt").classList.toggle("checked", x.checked);
-  });
-}
-
-async function applyProduct(){
-  var id = C.findProduct(choice.quantity, choice.phase);
-  if(!id) return;
-
-  if(await loop.setProduct(id)){
-    C.Prefs.write({ product:id });
-  } else {
-    /* GeoMet a refusé : on se recale sur ce que la boucle affiche vraiment. */
-    choice.phase    = loop.info().phase;
-    choice.quantity = loop.info().quantity;
-    syncProductInputs();
-    toast("« " + id + " » indisponible — "
-          + (loop.lastError ? loop.lastError.message.replace(/\.+$/, "") : "cause inconnue")
-          + ". Retour à " + choice.quantity.toLowerCase() + " — " + choice.phase.toLowerCase() + ".");
-  }
-  if($("#coverage").checked) setCoverage(true);   // la couverture suit la phase
-}
-
-document.querySelectorAll('input[name=phase], input[name=quantity]').forEach(function(r){
-  r.onchange = function(e){
-    choice[e.target.name] = e.target.value;
-    applyProduct();
-  };
-});
-syncProductInputs();
-
 document.querySelectorAll(".opt input").forEach(function(i){
   var sync = function(){ i.closest(".opt").classList.toggle("checked", i.checked); };
   i.addEventListener("change", sync);
@@ -394,17 +388,19 @@ document.querySelectorAll(".opt input").forEach(function(i){
 
 /* --------------------------------------------------------- couches fixes */
 var coverageLayer = null;
-function setCoverage(on){
+$("#coverage").onchange = function(e){
   if(coverageLayer){ map.removeLayer(coverageLayer); coverageLayer = null; }
-  if(!on) return;
-  var id = loop.info().coverage;
-  if(!id) return;
+  if(!e.target.checked) return;
+
+  var id = null;
+  loop.tracks.forEach(function(t){ if(!id && t.meta.coverage) id = t.meta.coverage; });
+  if(!id){ toast("Aucune couche animée n'a de couverture associée."); e.target.checked = false; return; }
+
   coverageLayer = L.tileLayer.wms(C.GEOMET + "?", {
     layers:id, format:"image/png", transparent:true,
     version:"1.3.0", opacity:.45, pane:"static"
   }).addTo(map);
-}
-$("#coverage").onchange = function(e){ setCoverage(e.target.checked); };
+};
 
 $("#labels").onchange = function(e){
   if(e.target.checked) maps.labels[baseKey].addTo(map);
@@ -456,15 +452,23 @@ function addCustom(id){
   $("#custom-id").value = "";
   $("#custom-id").blur();
 }
-$("#custom-add").onclick = function(){ addCustom($("#custom-id").value); };
+$("#custom-add").onclick  = function(){ addCustom($("#custom-id").value); };
+$("#custom-anim").onclick = function(){
+  var id = $("#custom-id").value.trim();
+  if(!id) return;
+  C.remember(id, { title:id });
+  addTrack(id, C.metaFor(id));
+  $("#custom-id").value = "";
+  $("#custom-id").blur();
+};
 $("#custom-id").addEventListener("keydown", function(e){
   if(e.key === "Enter") addCustom(e.target.value);
 });
 
 /* ------------------------------------------------------------- catalogue */
 /*  Le navigateur atteint GeoMet ; c'est donc lui qui dresse la liste des
-    couches réellement servies. Une couche munie d'un axe temps peut être
-    animée comme les produits, les autres se posent en couche fixe.       */
+    couches réellement servies. Une couche munie d'un axe temps s'ajoute à
+    la pile animée, les autres se posent en couche fixe.                  */
 async function loadCatalogue(){
   $("#cat-status").textContent = "Interrogation du service…";
   $("#cat-load").disabled = true;
@@ -497,24 +501,12 @@ function renderCatalogue(list){
     row.innerHTML = '<span class="n mono"></span><span class="t"></span>';
     row.querySelector(".n").textContent = l.name;
     row.querySelector(".t").textContent = l.title || (l.time ? "animable" : "couche fixe");
-    row.onclick = function(){ useCatalogueLayer(l); };
+    row.onclick = function(){
+      if(l.time){ C.remember(l.name, l); addTrack(l.name, C.metaFor(l.name)); }
+      else { addCustom(l.name); toast("« " + l.name + " » posée en couche fixe."); }
+    };
     host.appendChild(row);
   });
-}
-
-async function useCatalogueLayer(l){
-  if(!l.time){ addCustom(l.name); toast("« " + l.name + " » posée en couche fixe."); return; }
-
-  C.remember(l.name, l);
-  if(await loop.setProduct(l.name)){
-    C.Prefs.write({ product:l.name });
-    $("#legend-img").src = loop.legendUrl();
-    openSheet(false);
-    toast("Animation de « " + l.name + " »" + (l.title ? " — " + l.title : "") + ".");
-  } else {
-    toast("« " + l.name + " » indisponible — "
-          + (loop.lastError ? loop.lastError.message.replace(/\.+$/, "") : "cause inconnue") + ".");
-  }
 }
 
 $("#cat-load").onclick = loadCatalogue;
@@ -522,9 +514,27 @@ $("#cat-filter").addEventListener("keydown", function(e){
   if(e.key === "Enter"){ e.target.blur(); loadCatalogue(); }
 });
 
-/* --------------------------------------------------------------- légende */
+/* --------------------------------------------------------------- légendes */
+function refreshLegend(){
+  var box = $("#legend");
+  box.textContent = "";
+  loop.tracks.forEach(function(t){
+    var wrap = document.createElement("div");
+    wrap.className = "legend-item";
+    var cap = document.createElement("div");
+    cap.className = "legend-cap mono";
+    cap.textContent = t.unit() || t.id;
+    var img = document.createElement("img");
+    img.src = t.legendUrl();
+    img.alt = "Échelle de couleurs de " + t.id;
+    wrap.appendChild(cap);
+    wrap.appendChild(img);
+    box.appendChild(wrap);
+  });
+}
 $("#legend-btn").onclick = function(){
   var on = $("#legend").style.display !== "block";
+  if(on) refreshLegend();
   $("#legend").style.display = on ? "block" : "none";
   $("#legend-btn").classList.toggle("on", on);
   $("#legend-btn").setAttribute("aria-pressed", String(on));
@@ -537,6 +547,7 @@ function openSheet(on){
   $("#sheet-btn").setAttribute("aria-expanded", String(on));
 }
 $("#sheet-btn").onclick = function(){ openSheet(!$("#sheet").classList.contains("open")); };
+$("#stack-btn").onclick = function(){ openSheet(true); $("#sheet").scrollTop = 0; };
 $("#veil").onclick = function(){ openSheet(false); };
 $("#grip").onclick = function(){ openSheet(false); };
 document.addEventListener("keydown", function(e){
@@ -562,24 +573,34 @@ $("#locate").onclick = function(){
 
 /* ------------------------------------------------------ lecture au point */
 map.on("click", async function(ev){
-  if(!loop.times.length) return;
+  if(!loop.tracks.length) return;
 
   var coords = ev.latlng.lat.toFixed(3) + ", " + ev.latlng.lng.toFixed(3);
-  $("#readout").style.display = "flex";
-  $("#readout-v").textContent = "…";
-  $("#readout-c").textContent = coords;
+  var box = $("#readout");
+  box.style.display = "block";
+  box.textContent = "…";
 
-  try {
-    var r = await loop.valueAt(ev.latlng);
-    $("#readout-v").textContent = (r.value === null || isNaN(r.value))
-      ? "aucun écho"
+  var results = await loop.valueAt(ev.latlng);
+  box.textContent = "";
+  results.forEach(function(r){
+    var line = document.createElement("div");
+    line.className = "readout-line";
+    var v = (r.value === null || isNaN(r.value))
+      ? (r.failed ? "lecture impossible" : "aucun écho")
       : r.value.toFixed(2) + " " + r.unit;
-    $("#readout-c").textContent = coords + " · " + $("#stamp-time").textContent;
-  } catch(e){
-    $("#readout-v").textContent = "lecture impossible";
-  }
+    line.innerHTML = '<span class="rl-id mono"></span><span class="v"></span>';
+    line.querySelector(".rl-id").textContent = r.id;
+    line.querySelector(".v").textContent = v;
+    box.appendChild(line);
+  });
+
+  var foot = document.createElement("div");
+  foot.className = "c mono";
+  foot.textContent = coords + " · " + $("#stamp-time").textContent;
+  box.appendChild(foot);
+
   clearTimeout(map._readoutTimer);
-  map._readoutTimer = setTimeout(function(){ $("#readout").style.display = "none"; }, 12000);
+  map._readoutTimer = setTimeout(function(){ box.style.display = "none"; }, 14000);
 });
 
 /* ------------------------------------------ hauteur réelle et redimension */
@@ -598,10 +619,25 @@ document.addEventListener("visibilitychange", function(){
   if(document.hidden) loop.pause();
 });
 
-loop.build().then(function(ok){
-  if(ok) setTimeout(function(){ loop.play(); }, 1200);
-  else setTimeout(function(){ loop.build(); }, 60000);
-});
+/* -------------------------------------------------------------- démarrage */
+(async function start(){
+  var wanted = prefs.tracks && prefs.tracks.length
+    ? prefs.tracks
+    : [{ id:"RADAR_1KM_RRAI", opacity:0.78 }];
+
+  for(var i = 0; i < wanted.length; i++){
+    var w = wanted[i];
+    if(!C.PRODUCTS[w.id]) C.remember(w.id, { title:w.title || w.id, unit:w.unit || "" });
+    if(!await loop.addTrack(w.id, C.metaFor(w.id), w.opacity)){
+      toast("« " + w.id + " » n'a pas pu être rechargée — "
+            + (loop.lastError ? loop.lastError.message.replace(/\.+$/, "") : "cause inconnue") + ".");
+    }
+  }
+
+  onTracks(loop.tracks);
+  saveTracks();
+  if(loop.times.length > 1) setTimeout(function(){ loop.play(); }, 1200);
+})();
 
 })();
 </script>

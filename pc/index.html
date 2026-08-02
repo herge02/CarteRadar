@@ -12,8 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=7">
-<link rel="stylesheet" href="/assets/pc.css?v=7">
+<link rel="stylesheet" href="/assets/theme.css?v=8">
+<link rel="stylesheet" href="/assets/pc.css?v=8">
 </head>
 <body>
 
@@ -21,23 +21,21 @@
 
 <aside id="drawer">
   <h1>Console radar</h1>
-  <div class="sub">ECCC · composite 1 km · MAJ 6 min</div>
+  <div class="sub">ECCC · GeoMet</div>
 
   <div class="group">
-    <span class="eyebrow">Produit animé</span>
-    <div id="prod-list"></div>
-    <div class="row" style="margin-top:12px">
-      <span class="eyebrow" style="flex:0 0 auto">Opacité</span>
-      <input type="range" id="opacity" min="20" max="100" value="78" style="width:96px">
-      <span class="val mono" id="opacity-val">78 %</span>
-    </div>
+    <span class="eyebrow">Couches animées</span>
+    <div id="track-list"></div>
+    <p class="hint" id="track-empty">Aucune couche animée. Ajoutez-en ci-dessous
+      ou depuis le catalogue.</p>
+    <div id="quick"></div>
   </div>
 
   <div class="group">
     <span class="eyebrow">Couches fixes</span>
     <label class="opt"><input type="checkbox" id="coverage"> Couverture radar</label>
     <label class="opt"><input type="checkbox" id="labels" checked> Noms de lieux par-dessus</label>
-    <label class="opt"><input type="checkbox" id="legend-on"> Échelle de couleurs</label>
+    <label class="opt"><input type="checkbox" id="legend-on"> Échelles de couleurs</label>
   </div>
 
   <div class="group">
@@ -63,7 +61,8 @@
     <span class="eyebrow">Ajouter une couche à la main</span>
     <div class="field">
       <input type="text" id="custom-id" placeholder="ex. HRDPS.CONTINENTAL_PR" spellcheck="false">
-      <button id="custom-add">Ajouter</button>
+      <button id="custom-add">Fixe</button>
+      <button id="custom-anim">Animée</button>
     </div>
     <div id="custom-list"></div>
   </div>
@@ -74,23 +73,24 @@
       <input type="range" id="frames" min="6" max="30" value="30" style="width:96px">
       <span class="val mono" id="frames-val">30</span>
     </div>
-    <p class="hint">GeoMet ne diffuse que les 3 dernières heures, soit 30 images au maximum.</p>
+    <p class="hint">S'applique à chaque couche animée. GeoMet ne diffuse que les
+      dernières heures.</p>
   </div>
 
   <div id="drawer-foot">
     <a class="swap" href="/mobile?v=mobile">Passer à la vue mobile →</a>
-    <p class="hint">Espace : lecture. ← → : image par image. Clic sur la carte : intensité au point.</p>
+    <p class="hint">Espace : lecture. ← → : image par image. Clic sur la carte : valeurs au point.</p>
     <p class="hint mono">moteur v<span id="ver">?</span></p>
   </div>
 </aside>
 
 <button id="drawer-toggle" aria-expanded="true">Couches</button>
 
-<div id="legend"><img id="legend-img" alt="Échelle de couleurs du produit affiché"></div>
+<div id="legend"></div>
 
 <div id="readout">
   <span class="eyebrow">Lecture au point</span>
-  <div class="v" id="readout-v">—</div>
+  <div id="readout-rows"></div>
   <div class="c" id="readout-c"></div>
 </div>
 
@@ -131,7 +131,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=7"></script>
+<script src="/assets/radar-core.js?v=8"></script>
 <script>
 (function(){
 "use strict";
@@ -181,23 +181,18 @@ function toast(msg){
 }
 
 /* ------------------------------------------------------------ la boucle */
-/* Un produit retiré du catalogue peut survivre dans les préférences : sans
-   ce filtre, la console démarrerait sur une couche que GeoMet refuse. */
-var startProduct = C.PRODUCTS[prefs.product] ? prefs.product : "RADAR_1KM_RRAI";
-
 var loop = new C.RadarLoop(map, {
-  product: startProduct,
-  wanted : prefs.wanted  || 30,
-  fps    : prefs.fps     || 5,
-  opacity: prefs.opacity != null ? prefs.opacity : 0.78,
+  wanted : prefs.wanted || 30,
+  fps    : prefs.fps    || 5,
   on: {
     built    : onBuilt,
     show     : onShow,
     progress : onProgress,
     playing  : onPlaying,
+    tracks   : onTracks,
     error    : function(e){
       $("#stamp-utc").textContent = "GeoMet injoignable";
-      toast("Impossible de joindre GeoMet : " + e.message + ". Nouvel essai dans 60 s.");
+      toast("Impossible de joindre GeoMet : " + e.message);
     }
   }
 });
@@ -216,10 +211,8 @@ function onProgress(ratio){
 }
 
 function onBuilt(l){
-  $("#frames").max = Math.max(6, l.available);
-  $("#ruler").setAttribute("aria-valuemax", l.times.length - 1);
+  $("#ruler").setAttribute("aria-valuemax", Math.max(0, l.times.length - 1));
   drawRuler(l.times);
-  refreshLegend();
 }
 
 function onShow(d, i, n){
@@ -231,6 +224,88 @@ function onShow(d, i, n){
   $("#head").style.left = pct + "%";
   $("#ruler").setAttribute("aria-valuenow", i);
   $("#ruler").setAttribute("aria-valuetext", C.clock(d));
+}
+
+/* ============================================== pile des couches animées */
+
+function saveTracks(){
+  C.Prefs.write({ tracks: loop.tracks.map(function(t){
+    return { id:t.id, opacity:t.opacity, title:t.meta.title || "", unit:t.meta.unit || "" };
+  })});
+}
+
+function onTracks(tracks){
+  var host = $("#track-list");
+  host.textContent = "";
+  $("#track-empty").hidden = tracks.length > 0;
+
+  tracks.forEach(function(t){
+    var row = document.createElement("div");
+    row.className = "track-row";
+    row.innerHTML =
+      '<div class="track-head">' +
+        '<span class="track-id mono"></span>' +
+        '<button class="track-del" aria-label="Retirer cette couche">&times;</button>' +
+      '</div>' +
+      '<div class="track-title"></div>' +
+      '<div class="row">' +
+        '<input type="range" class="track-op" min="0" max="100" step="1">' +
+        '<span class="val mono track-val"></span>' +
+      '</div>';
+
+    row.querySelector(".track-id").textContent = t.id;
+    row.querySelector(".track-title").textContent =
+      (t.meta.title || t.meta.quantity || "") + (t.unit() ? "  ·  " + t.unit() : "");
+
+    var slider = row.querySelector(".track-op");
+    var val    = row.querySelector(".track-val");
+    slider.value = Math.round(t.opacity * 100);
+    val.textContent = slider.value + " %";
+    slider.oninput = function(e){
+      loop.setTrackOpacity(t.id, +e.target.value / 100);
+      val.textContent = e.target.value + " %";
+      saveTracks();
+    };
+
+    row.querySelector(".track-del").onclick = function(){
+      loop.removeTrack(t.id);
+      saveTracks();
+      refreshLegend();
+      refreshQuick();
+    };
+
+    host.appendChild(row);
+  });
+
+  refreshLegend();
+  refreshQuick();
+}
+
+/* Raccourcis vers les produits vérifiés qui ne sont pas déjà empilés. */
+function refreshQuick(){
+  var host = $("#quick");
+  host.textContent = "";
+  Object.keys(C.PRODUCTS).forEach(function(id){
+    if(loop.find(id)) return;
+    var p = C.PRODUCTS[id];
+    var b = document.createElement("button");
+    b.className = "quick-add";
+    b.type = "button";
+    b.textContent = "+ " + p.phase + " (" + p.unit + ")";
+    b.onclick = function(){ addTrack(id, p); };
+    host.appendChild(b);
+  });
+}
+
+async function addTrack(id, meta){
+  if(loop.find(id)){ toast("« " + id + " » est déjà dans la pile."); return; }
+  if(await loop.addTrack(id, meta, 0.78)){
+    saveTracks();
+    if(!loop.playing && loop.times.length > 1) loop.play();
+  } else {
+    toast("« " + id + " » indisponible — "
+          + (loop.lastError ? loop.lastError.message.replace(/\.+$/, "") : "cause inconnue") + ".");
+  }
 }
 
 /* -------------------------------------------------------- règle graduée */
@@ -307,14 +382,6 @@ $("#fps").oninput = function(e){
   C.Prefs.write({ fps:loop.fps });
 };
 
-$("#opacity").value = Math.round(loop.opacity * 100);
-$("#opacity-val").textContent = Math.round(loop.opacity * 100) + " %";
-$("#opacity").oninput = function(e){
-  loop.setOpacity(+e.target.value / 100);
-  $("#opacity-val").textContent = e.target.value + " %";
-  C.Prefs.write({ opacity:loop.opacity });
-};
-
 $("#frames").value = loop.wanted;
 $("#frames-val").textContent = loop.wanted;
 var framesDebounce;
@@ -328,62 +395,6 @@ $("#frames").oninput = function(e){
   }, 400);
 };
 
-/* La liste des produits est engendrée depuis RadarCore.PRODUCTS, groupée
-   par grandeur mesurée : taux de précipitation, puis réflectivité. */
-(function buildProducts(){
-  var host = $("#prod-list");
-  var groups = {};
-  Object.keys(C.PRODUCTS).forEach(function(id){
-    var q = C.PRODUCTS[id].quantity;
-    (groups[q] = groups[q] || []).push(id);
-  });
-
-  var quantities = Object.keys(groups);
-  quantities.forEach(function(q){
-    /* Un seul intitulé de grandeur n'apprend rien : on l'omet. */
-    if(quantities.length > 1){
-      var head = document.createElement("div");
-      head.className = "subhead";
-      head.textContent = q;
-      host.appendChild(head);
-    }
-
-    groups[q].forEach(function(id){
-      var p = C.PRODUCTS[id];
-      var lab = document.createElement("label");
-      lab.className = "opt";
-      lab.innerHTML = '<input type="radio" name="prod"><span></span><span class="unit"></span>';
-      var input = lab.querySelector("input");
-      input.value = id;
-      input.checked = id === loop.product;
-      lab.querySelectorAll("span")[0].textContent = p.phase;
-      lab.querySelector(".unit").textContent = p.unit;
-      host.appendChild(lab);
-    });
-  });
-})();
-
-document.querySelectorAll('input[name=prod]').forEach(function(r){
-  r.onchange = async function(e){
-    var wanted = e.target.value;
-    if(await loop.setProduct(wanted)){
-      C.Prefs.write({ product:wanted });
-    } else {
-      /* Refus de GeoMet : la boucle est revenue en arrière, la coche aussi. */
-      var back = document.querySelector('input[name=prod][value="' + loop.product + '"]');
-      if(back) back.checked = true;
-      document.querySelectorAll('input[name=prod]').forEach(function(x){
-        x.closest(".opt").classList.toggle("checked", x.checked);
-      });
-      var now = loop.info();
-      toast("« " + wanted + " » indisponible — "
-            + (loop.lastError ? loop.lastError.message.replace(/\.+$/, "") : "cause inconnue")
-            + ". Retour à " + now.quantity.toLowerCase() + " — " + now.phase.toLowerCase() + ".");
-    }
-    if($("#coverage").checked) setCoverage(true);   // la couverture suit la phase
-  };
-});
-
 document.querySelectorAll(".opt input").forEach(function(i){
   var sync = function(){ i.closest(".opt").classList.toggle("checked", i.checked); };
   i.addEventListener("change", sync);
@@ -392,17 +403,20 @@ document.querySelectorAll(".opt input").forEach(function(i){
 
 /* ------------------------------------------------------- couches fixes */
 var coverageLayer = null;
-function setCoverage(on){
+$("#coverage").onchange = function(e){
   if(coverageLayer){ map.removeLayer(coverageLayer); coverageLayer = null; }
-  if(!on) return;
-  var id = loop.info().coverage;
-  if(!id) return;
+  if(!e.target.checked) return;
+
+  /* Suit la première piste qui déclare une couverture. */
+  var id = null;
+  loop.tracks.forEach(function(t){ if(!id && t.meta.coverage) id = t.meta.coverage; });
+  if(!id){ toast("Aucune couche animée n'a de couverture associée."); e.target.checked = false; return; }
+
   coverageLayer = L.tileLayer.wms(C.GEOMET + "?", {
     layers:id, format:"image/png", transparent:true,
     version:"1.3.0", opacity:.45, pane:"static"
   }).addTo(map);
-}
-$("#coverage").onchange = function(e){ setCoverage(e.target.checked); };
+};
 
 $("#labels").onchange = function(e){
   if(e.target.checked) maps.labels[baseKey].addTo(map);
@@ -453,25 +467,30 @@ function addCustom(id){
   $("#custom-list").appendChild(chip);
   $("#custom-id").value = "";
 }
-$("#custom-add").onclick = function(){ addCustom($("#custom-id").value); };
+$("#custom-add").onclick  = function(){ addCustom($("#custom-id").value); };
+$("#custom-anim").onclick = function(){
+  var id = $("#custom-id").value.trim();
+  if(!id) return;
+  C.remember(id, { title:id });
+  addTrack(id, C.metaFor(id));
+  $("#custom-id").value = "";
+};
 $("#custom-id").addEventListener("keydown", function(e){
   if(e.key === "Enter") addCustom(e.target.value);
 });
 
 /* ------------------------------------------------------------- catalogue */
 /*  Le navigateur atteint GeoMet ; c'est donc lui qui dresse la liste des
-    couches réellement servies. Une couche munie d'un axe temps peut être
-    animée comme les produits, les autres se posent en couche fixe.       */
-var catStatus = $("#cat-status");
-
+    couches réellement servies. Une couche munie d'un axe temps s'ajoute à
+    la pile animée, les autres se posent en couche fixe.                  */
 async function loadCatalogue(){
-  catStatus.textContent = "Interrogation du service…";
+  $("#cat-status").textContent = "Interrogation du service…";
   $("#cat-load").disabled = true;
 
   var list;
   try { list = await C.fetchCatalogue(); }
   catch(e){
-    catStatus.textContent = "Catalogue illisible : " + e.message;
+    $("#cat-status").textContent = "Catalogue illisible : " + e.message;
     $("#cat-load").disabled = false;
     return;
   }
@@ -484,7 +503,7 @@ function renderCatalogue(list){
   var host  = $("#cat-list");
   host.textContent = "";
 
-  catStatus.textContent = found.length
+  $("#cat-status").textContent = found.length
     ? found.length + " couche" + (found.length > 1 ? "s" : "") + " sur "
       + list.length + " au catalogue" + (found.length > 80 ? ", 80 affichées" : "")
     : "Aucune couche ne correspond, sur " + list.length + " au catalogue.";
@@ -493,60 +512,68 @@ function renderCatalogue(list){
     var row = document.createElement("button");
     row.className = "cat-row" + (l.time ? " anim" : "");
     row.type = "button";
-    row.title = l.time ? "Animer cette couche" : "Poser en couche fixe";
+    row.title = l.time ? "Ajouter à la pile animée" : "Poser en couche fixe";
     row.innerHTML = '<span class="n mono"></span><span class="t"></span>';
     row.querySelector(".n").textContent = l.name;
     row.querySelector(".t").textContent = l.title || (l.time ? "animable" : "couche fixe");
-    row.onclick = function(){ useCatalogueLayer(l); };
+    row.onclick = function(){
+      if(l.time){ C.remember(l.name, l); addTrack(l.name, C.metaFor(l.name)); }
+      else { addCustom(l.name); toast("« " + l.name + " » posée en couche fixe."); }
+    };
     host.appendChild(row);
   });
-}
-
-async function useCatalogueLayer(l){
-  if(!l.time){ addCustom(l.name); toast("« " + l.name + " » posée en couche fixe."); return; }
-
-  C.remember(l.name, l);
-  if(await loop.setProduct(l.name)){
-    C.Prefs.write({ product:l.name });
-    document.querySelectorAll('input[name=prod]').forEach(function(x){
-      x.checked = false;
-      x.closest(".opt").classList.remove("checked");
-    });
-    refreshLegend();
-    toast("Animation de « " + l.name + " »" + (l.title ? " — " + l.title : "") + ".");
-  } else {
-    toast("« " + l.name + " » indisponible — "
-          + (loop.lastError ? loop.lastError.message.replace(/\.+$/, "") : "cause inconnue") + ".");
-  }
 }
 
 $("#cat-load").onclick = loadCatalogue;
 $("#cat-filter").addEventListener("keydown", function(e){ if(e.key === "Enter") loadCatalogue(); });
 
-/* --------------------------------------------------------------- légende */
-function refreshLegend(){ $("#legend-img").src = loop.legendUrl(); }
+/* --------------------------------------------------------------- légendes */
+function refreshLegend(){
+  var box = $("#legend");
+  box.textContent = "";
+  loop.tracks.forEach(function(t){
+    var wrap = document.createElement("div");
+    wrap.className = "legend-item";
+    var cap = document.createElement("div");
+    cap.className = "legend-cap mono";
+    cap.textContent = t.unit() || t.id;
+    var img = document.createElement("img");
+    img.src = t.legendUrl();
+    img.alt = "Échelle de couleurs de " + t.id;
+    wrap.appendChild(cap);
+    wrap.appendChild(img);
+    box.appendChild(wrap);
+  });
+}
 $("#legend-on").onchange = function(e){
   $("#legend").style.display = e.target.checked ? "block" : "none";
+  if(e.target.checked) refreshLegend();
 };
 
 /* ------------------------------------------------------ lecture au point */
 map.on("click", async function(ev){
-  if(!loop.times.length) return;
+  if(!loop.tracks.length) return;
 
   var coords = ev.latlng.lat.toFixed(4) + ", " + ev.latlng.lng.toFixed(4);
+  var rows = $("#readout-rows");
   $("#readout").style.display = "block";
-  $("#readout-v").textContent = "…";
+  rows.textContent = "…";
   $("#readout-c").textContent = coords;
 
-  try {
-    var r = await loop.valueAt(ev.latlng);
-    $("#readout-v").textContent = (r.value === null || isNaN(r.value))
-      ? "aucun écho"
+  var results = await loop.valueAt(ev.latlng);
+  rows.textContent = "";
+  results.forEach(function(r){
+    var line = document.createElement("div");
+    line.className = "readout-line";
+    var v = (r.value === null || isNaN(r.value))
+      ? (r.failed ? "lecture impossible" : "aucun écho")
       : r.value.toFixed(2) + " " + r.unit;
-    $("#readout-c").textContent = coords + "  ·  " + $("#stamp-time").textContent;
-  } catch(e){
-    $("#readout-v").textContent = "lecture impossible";
-  }
+    line.innerHTML = '<span class="rl-id mono"></span><span class="v"></span>';
+    line.querySelector(".rl-id").textContent = r.id;
+    line.querySelector(".v").textContent = v;
+    rows.appendChild(line);
+  });
+  $("#readout-c").textContent = coords + "  ·  " + $("#stamp-time").textContent;
 });
 
 /* ---------------------------------------------------------------- tiroir */
@@ -566,10 +593,25 @@ document.addEventListener("visibilitychange", function(){
   if(document.hidden) loop.pause();
 });
 
-loop.build().then(function(ok){
-  if(ok) setTimeout(function(){ loop.play(); }, 1500);
-  else setTimeout(function(){ loop.build(); }, 60000);
-});
+/* -------------------------------------------------------------- démarrage */
+(async function start(){
+  var wanted = prefs.tracks && prefs.tracks.length
+    ? prefs.tracks
+    : [{ id:"RADAR_1KM_RRAI", opacity:0.78 }];
+
+  for(var i = 0; i < wanted.length; i++){
+    var w = wanted[i];
+    if(!C.PRODUCTS[w.id]) C.remember(w.id, { title:w.title || w.id, unit:w.unit || "" });
+    if(!await loop.addTrack(w.id, C.metaFor(w.id), w.opacity)){
+      toast("« " + w.id + " » n'a pas pu être rechargée — "
+            + (loop.lastError ? loop.lastError.message.replace(/\.+$/, "") : "cause inconnue") + ".");
+    }
+  }
+
+  onTracks(loop.tracks);
+  saveTracks();
+  if(loop.times.length > 1) setTimeout(function(){ loop.play(); }, 1200);
+})();
 
 })();
 </script>

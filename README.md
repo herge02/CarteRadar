@@ -9,8 +9,8 @@ Deux interfaces distinctes partagent le même moteur :
 
 | Adresse   | Pour                          | Ce qui change                                                                 |
 |-----------|-------------------------------|-------------------------------------------------------------------------------|
-| `/pc`     | Écran large, souris, clavier   | Tiroir latéral, règle graduée à l'heure, raccourcis clavier, lecture au point |
-| `/mobile` | Téléphone, tablette, tactile   | Bandes haute et basse, feuille de réglages, gros curseur, géolocalisation      |
+| `/pc`     | Écran large, souris, clavier   | Tiroir latéral, règle graduée à l'heure, raccourcis clavier                   |
+| `/mobile` | Téléphone, tablette, tactile   | Bandes haute et basse, feuille de réglages, gros curseur, géolocalisation     |
 
 La racine `/` détecte l'appareil et redirige. Le choix est mémorisé.
 
@@ -47,33 +47,41 @@ Quand rien de tout cela n'est trouvé, le message d'erreur emporte un portrait
 du document reçu — élément racine, nombre de `Layer`, `Dimension` et `Extent`,
 premiers noms de couches. Un échec d'analyse se distingue ainsi d'une panne du
 service sans avoir à ouvrir les outils de développement.
+
 Les deux pages ne font qu'y brancher leurs commandes. Une correction du moteur
 profite donc aux deux versions.
 
 ## Fonctions
 
-- **Produits** : deux composites 1 km — `RADAR_1KM_RRAI` (mm/h) et
-  `RADAR_1KM_RSNO` (cm/h). « Pluie » et « neige » désignent la table de
-  conversion appliquée à l'écho, pas ce qui tombe réellement.
+- **Pile de couches animées** : plusieurs couches WMS se superposent, chacune
+  avec sa propre opacité, sa propre cadence et son propre axe temps. La ligne
+  du temps de la console est l'union des instants de toutes les pistes ; à
+  chaque pas, une piste montre l'image la plus proche qu'elle possède. Un
+  radar aux 6 minutes et un satellite aux 10 cohabitent donc sans trou ni
+  clignotement.
 
-  La liste vit dans `PRODUCTS`, au début de `assets/radar-core.js` : une ligne
-  de plus la fait apparaître dans les deux interfaces, et les intitulés de
-  grandeur reparaissent d'eux-mêmes dès qu'il y en a plus d'une. Si GeoMet
-  refuse une couche, la console revient au produit précédent et affiche la
-  cause ; un produit retiré du catalogue mais resté dans les préférences est
-  ignoré au démarrage.
+  L'ordre d'empilement suit l'ordre d'ajout : la dernière ajoutée passe
+  au-dessus.
 
-  **N'y inscrire qu'un identifiant relevé dans le `GetCapabilities` du
-  service.** Deux couches de réflectivité en dBZ y ont figuré sur la foi d'un
-  annuaire tiers qui republie GeoMet ; le service les refuse avec
-  `InvalidLayersParameter`. Un annuaire tiers n'est pas le catalogue.
+- **Produits de départ** : deux composites radar 1 km — `RADAR_1KM_RRAI`
+  (mm/h) et `RADAR_1KM_RSNO` (cm/h), proposés en raccourcis. « Pluie » et
+  « neige » désignent la table de conversion appliquée à l'écho, pas ce qui
+  tombe réellement.
+
+  La table `PRODUCTS`, au début de `assets/radar-core.js`, ne sert plus qu'à
+  ces raccourcis outillés — couverture radar associée, unité connue. Tout le
+  reste passe par le catalogue. **N'y inscrire qu'un identifiant relevé dans
+  le `GetCapabilities` du service** : deux couches de réflectivité y ont
+  figuré sur la foi d'un annuaire tiers qui republie GeoMet, et le service
+  les refuse avec `InvalidLayersParameter`.
+
 - **Boucle** : jusqu'à 30 images, soit les trois dernières heures. Arrêt d'une
   seconde et demie sur la dernière image avant de reboucler, comme les boucles
   d'ECCC.
 - **Rafraîchissement** : vérification chaque minute ; les nouvelles images sont
   ajoutées sans rebâtir la pile, et les plus vieilles sont retirées.
-- **Lecture au point** : un clic ou une touche donne l'intensité sous le
-  curseur, à l'image affichée.
+- **Lecture au point** : un clic ou une touche donne une valeur **par couche
+  empilée**, chacune à l'image qu'elle montre à cet instant.
 - **Catalogue** : la console interroge le `GetCapabilities` complet et liste
   les couches réellement servies, filtrées par identifiant ou par intitulé.
   Celles qui portent un axe temps sont marquées d'un ▶ et s'animent d'un clic ;
@@ -89,8 +97,9 @@ profite donc aux deux versions.
 
 - **Couches libres** : un identifiant peut aussi être saisi à la main, par
   exemple `HRDPS.CONTINENTAL_PR`.
-- **Mémoire** : produit, opacité, vitesse, fond de carte et dernière position
-  de la carte sont conservés dans le navigateur.
+- **Mémoire** : la pile de couches avec leurs opacités, la vitesse, le fond de
+  carte et la dernière position sont conservés dans le navigateur. Une couche
+  que le service ne sert plus est signalée au rechargement, pas subie.
 - **Économie** : la lecture s'arrête quand l'onglet passe en arrière-plan. La
   version mobile charge 15 images par défaut plutôt que 30.
 
@@ -118,7 +127,7 @@ sans le suffixe `.html`.
 Les pages et les fichiers de `assets/` sont servis en `no-cache` : le
 navigateur les garde, mais revalide avant chaque usage, et reçoit un 304 tant
 que rien n'a changé. Les liens vers `assets/` portent en plus une marque de
-version (`?v=4`).
+version (`?v=8`).
 
 Cette prudence a une raison. Un `stale-while-revalidate` généreux sur les
 assets a déjà servi un `radar-core.js` périmé avec un HTML à jour : les deux

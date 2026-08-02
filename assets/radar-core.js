@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "7";
+var VERSION = "8";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -30,14 +30,6 @@ var PRODUCTS = {
   RADAR_1KM_RRAI: { quantity:"Taux de précipitation", phase:"Pluie", unit:"mm/h", coverage:"RADAR_COVERAGE_RRAI.INV" },
   RADAR_1KM_RSNO: { quantity:"Taux de précipitation", phase:"Neige", unit:"cm/h", coverage:"RADAR_COVERAGE_RSNO.INV" }
 };
-
-/* Retrouve l'identifiant à partir du couple grandeur / phase. */
-function findProduct(quantity, phase){
-  for(var id in PRODUCTS){
-    if(PRODUCTS[id].quantity === quantity && PRODUCTS[id].phase === phase) return id;
-  }
-  return null;
-}
 
 /* GeoMet ne conserve que les trois dernières heures, à six minutes d'écart. */
 var MAX_FRAMES = 30;
@@ -291,50 +283,10 @@ function expandTimeDimension(raw, wanted){
     .sort(function(a, b){ return a - b; });
 }
 
-/* ============================================================ RadarLoop ==
-   Détient la pile d'images WMS et son horloge. L'interface s'y branche par
-   des rappels ; elle ne touche jamais aux couches Leaflet directement.    */
-
-function RadarLoop(map, opts){
-  opts = opts || {};
-  this.map     = map;
-  this.product = opts.product || "RADAR_1KM_RRAI";
-  this.wanted  = opts.wanted  || MAX_FRAMES;
-  this.fps     = opts.fps     || 5;
-  this.opacity = opts.opacity != null ? opts.opacity : 0.78;
-  this.dwell   = opts.dwell   || 1300;   // arrêt sur la dernière image
-
-  this.times = [];
-  this.frames = [];
-  this.idx = 0;
-  this.available = 0;
-  this.playing = false;
-  this.timer = null;
-  this.loaded = 0;
-  this.lastError = null;   // cause du dernier échec de build, pour le diagnostic
-
-  this.on = Object.assign({
-    built:    function(){},
-    show:     function(){},
-    progress: function(){},
-    playing:  function(){},
-    error:    function(){}
-  }, opts.on || {});
-}
-
 /*  Couches choisies dans le catalogue : hors de PRODUCTS, qui ne contient que
-    les produits vérifiés et outillés, mais connues de info() pour que
-    l'intitulé et l'unité s'affichent correctement.                        */
+    les produits vérifiés et outillés, mais retenues ici pour que l'intitulé
+    et l'unité suivent la couche partout où elle est affichée.            */
 var ADHOC = {};
-
-function remember(id, meta){
-  ADHOC[id] = {
-    quantity: (meta && meta.title) || id,
-    phase   : "",
-    unit    : (meta && meta.unit) || guessUnit(meta && meta.title),
-    coverage: null
-  };
-}
 
 /* L'intitulé de GeoMet porte son unité entre crochets : « … [dBZ] ». */
 function guessUnit(title){
@@ -342,63 +294,306 @@ function guessUnit(title){
   return m ? m[1] : "";
 }
 
-RadarLoop.prototype.info = function(){
-  return PRODUCTS[this.product] || ADHOC[this.product] ||
-         { quantity: this.product, phase: "", unit: "", coverage: null };
+function remember(id, meta){
+  ADHOC[id] = {
+    title   : (meta && meta.title) || id,
+    quantity: (meta && meta.title) || id,
+    phase   : "",
+    unit    : (meta && meta.unit) || guessUnit(meta && meta.title),
+    coverage: null
+  };
+  return ADHOC[id];
+}
+
+function metaFor(id){
+  return PRODUCTS[id] || ADHOC[id] || { quantity: id, phase: "", unit: "", coverage: null };
+}
+
+/* ================================================================ Track ==
+   Une couche animée : sa pile d'images WMS, son propre axe temps et sa
+   propre opacité. Plusieurs pistes se superposent, chacune gardant sa
+   cadence — le radar bat aux six minutes, un satellite à un autre rythme. */
+
+function Track(map, id, meta, opts){
+  opts = opts || {};
+  this.map     = map;
+  this.id      = id;
+  this.meta    = meta || {};
+  this.opacity = opts.opacity != null ? opts.opacity : 0.78;
+  this.zIndex  = opts.zIndex  != null ? opts.zIndex  : 400;
+
+  this.times  = [];
+  this.frames = [];
+  this.shown  = -1;      // index de l'image visible, -1 si aucune
+  this.loaded = 0;
+  this.available = 0;
+}
+
+Track.prototype.title = function(){
+  return this.meta.title || this.meta.quantity || this.id;
 };
 
-RadarLoop.prototype._frame = function(date){
+Track.prototype.unit = function(){
+  return this.meta.unit || "";
+};
+
+Track.prototype._frame = function(date){
   return L.tileLayer.wms(GEOMET + "?", {
-    layers        : this.product,
+    layers        : this.id,
     format        : "image/png",
     transparent   : true,
     version       : "1.3.0",
     time          : isoZ(date),
     opacity       : 0,
     pane          : "radar",
+    zIndex        : this.zIndex,
     updateWhenIdle: true,
     keepBuffer    : 1,
     attribution   : ATTR
   });
 };
 
-RadarLoop.prototype.build = async function(){
-  var data;
-  try { data = await fetchTimes(this.product, this.wanted); }
-  catch(e){ this.lastError = e; this.on.error(e); return false; }
-  this.lastError = null;
-
-  var self = this;
-  this.frames.forEach(function(l){ self.map.removeLayer(l); });
+Track.prototype.build = async function(wanted, onProgress){
+  var data = await fetchTimes(this.id, wanted);   // peut lever
+  this.destroy();
 
   this.times     = data.times;
   this.available = data.available;
   this.loaded    = 0;
-  this.frames    = data.times.map(function(d){ return self._frame(d); });
 
-  var total = this.frames.length;
+  var self = this, total = data.times.length;
+  this.frames = data.times.map(function(d){ return self._frame(d); });
   this.frames.forEach(function(l){
     l.once("load", function(){
       self.loaded++;
-      self.on.progress(self.loaded / total);
+      if(onProgress) onProgress(self.loaded / total);
     });
     l.addTo(self.map);
   });
-
-  this.on.built(this);
-  this.show(total - 1);
   return true;
+};
+
+/*  Chaque piste a sa cadence : à l'instant demandé par la ligne du temps
+    commune, on montre l'image la plus proche que cette piste possède.
+    Seules deux opacités changent, pas toute la pile.                     */
+Track.prototype.showAt = function(t){
+  var n = this.times.length;
+  if(!n) return;
+
+  var ms = t.getTime(), best = 0, delta = Infinity;
+  for(var i = 0; i < n; i++){
+    var d = Math.abs(this.times[i].getTime() - ms);
+    if(d < delta){ delta = d; best = i; }
+  }
+  if(best === this.shown) return;
+
+  if(this.shown >= 0 && this.frames[this.shown]) this.frames[this.shown].setOpacity(0);
+  this.frames[best].setOpacity(this.opacity);
+  this.shown = best;
+};
+
+Track.prototype.setOpacity = function(v){
+  this.opacity = v;
+  if(this.shown >= 0 && this.frames[this.shown]) this.frames[this.shown].setOpacity(v);
+};
+
+Track.prototype.setZIndex = function(z){
+  this.zIndex = z;
+  this.frames.forEach(function(l){ l.setZIndex(z); });
+};
+
+Track.prototype.destroy = function(){
+  var self = this;
+  this.frames.forEach(function(l){ self.map.removeLayer(l); });
+  this.frames = [];
+  this.times  = [];
+  this.shown  = -1;
+};
+
+/* Ajoute les images parues depuis le dernier appel, sans rebâtir la pile. */
+Track.prototype.refresh = async function(wanted){
+  var data = await fetchTimes(this.id, wanted);
+  if(!data.times.length) return false;
+
+  var newest = data.times[data.times.length - 1].getTime();
+  if(this.times.length && newest === this.times[this.times.length - 1].getTime()) return false;
+
+  var self = this, known = {};
+  this.times.forEach(function(d){ known[d.getTime()] = true; });
+
+  data.times.forEach(function(d){
+    if(known[d.getTime()]) return;
+    var l = self._frame(d);
+    l.addTo(self.map);
+    self.times.push(d);
+    self.frames.push(l);
+  });
+
+  while(this.times.length > wanted){
+    this.map.removeLayer(this.frames.shift());
+    this.times.shift();
+    this.shown = this.shown > 0 ? this.shown - 1 : -1;
+  }
+  return true;
+};
+
+Track.prototype.legendUrl = function(){
+  return GEOMET + "?version=1.3.0&service=WMS&request=GetLegendGraphic"
+       + "&sld_version=1.1.0&format=image/png&layer=" + encodeURIComponent(this.id);
+};
+
+/* Intensité sous un point, à l'image que cette piste montre en ce moment. */
+Track.prototype.valueAt = async function(latlng){
+  var out = { id: this.id, title: this.title(), unit: this.unit(), value: null };
+  if(this.shown < 0) return out;
+
+  var map  = this.map;
+  var size = map.getSize();
+  var b    = map.getBounds();
+  var sw   = L.CRS.EPSG3857.project(b.getSouthWest());
+  var ne   = L.CRS.EPSG3857.project(b.getNorthEast());
+  var pt   = map.latLngToContainerPoint(latlng);
+
+  var q = new URLSearchParams({
+    service: "WMS", version: "1.3.0", request: "GetFeatureInfo",
+    layers: this.id, query_layers: this.id,
+    crs: "EPSG:3857",
+    bbox: [sw.x, sw.y, ne.x, ne.y].join(","),
+    width: size.x, height: size.y,
+    i: Math.round(pt.x), j: Math.round(pt.y),
+    info_format: "application/json",
+    time: isoZ(this.times[this.shown])
+  });
+
+  try {
+    var res = await fetch(GEOMET + "?" + q.toString());
+    var txt = await res.text();
+    try {
+      var j = JSON.parse(txt);
+      var p = (j.features && j.features[0] && j.features[0].properties) || {};
+      for(var k in p){
+        var v = parseFloat(p[k]);
+        if(!isNaN(v)){ out.value = v; break; }
+      }
+    } catch(e){
+      var m = /-?\d+(\.\d+)?/.exec(txt);
+      if(m) out.value = parseFloat(m[0]);
+    }
+  } catch(e){ out.failed = true; }
+
+  return out;
+};
+
+/* ============================================================ RadarLoop ==
+   Chef d'orchestre : tient les pistes, la ligne du temps commune et
+   l'horloge de lecture. L'interface s'y branche par des rappels ; elle ne
+   touche jamais aux couches Leaflet directement.                         */
+
+function RadarLoop(map, opts){
+  opts = opts || {};
+  this.map    = map;
+  this.wanted = opts.wanted || MAX_FRAMES;
+  this.fps    = opts.fps    || 5;
+  this.dwell  = opts.dwell  || 1300;   // arrêt sur la dernière image
+
+  this.tracks = [];
+  this.times  = [];
+  this.idx    = 0;
+
+  this.playing   = false;
+  this.timer     = null;
+  this.lastError = null;
+
+  this.on = Object.assign({
+    built:    function(){},
+    show:     function(){},
+    progress: function(){},
+    playing:  function(){},
+    error:    function(){},
+    tracks:   function(){}
+  }, opts.on || {});
+}
+
+RadarLoop.prototype.find = function(id){
+  for(var i = 0; i < this.tracks.length; i++){
+    if(this.tracks[i].id === id) return this.tracks[i];
+  }
+  return null;
+};
+
+RadarLoop.prototype.addTrack = async function(id, meta, opacity){
+  if(this.find(id)) return true;
+
+  var self  = this;
+  var track = new Track(this.map, id, meta || PRODUCTS[id] || ADHOC[id], {
+    opacity: opacity,
+    zIndex : 400 + this.tracks.length
+  });
+
+  try {
+    await track.build(this.wanted, function(r){ self.on.progress(r); });
+  } catch(e){
+    this.lastError = e;
+    this.on.error(e);
+    track.destroy();
+    return false;
+  }
+
+  this.lastError = null;
+  this.tracks.push(track);
+  this.retime();
+  this.show(this.times.length - 1);
+  this.on.tracks(this.tracks);
+  return true;
+};
+
+RadarLoop.prototype.removeTrack = function(id){
+  var t = this.find(id);
+  if(!t) return false;
+
+  t.destroy();
+  this.tracks.splice(this.tracks.indexOf(t), 1);
+  this.tracks.forEach(function(tr, i){ tr.setZIndex(400 + i); });
+
+  this.retime();
+  if(this.times.length) this.show(Math.min(this.idx, this.times.length - 1));
+  else this.pause();
+  this.on.tracks(this.tracks);
+  return true;
+};
+
+RadarLoop.prototype.setTrackOpacity = function(id, v){
+  var t = this.find(id);
+  if(t) t.setOpacity(v);
+};
+
+/*  Ligne du temps commune : l'union des instants de toutes les pistes. Une
+    piste qui n'a pas d'image à un instant donné garde la sienne, la plus
+    proche — pas de trou, pas de clignotement.                            */
+RadarLoop.prototype.retime = function(){
+  var seen = {}, all = [];
+  this.tracks.forEach(function(t){
+    t.times.forEach(function(d){
+      var k = d.getTime();
+      if(!seen[k]){ seen[k] = true; all.push(d); }
+    });
+  });
+  all.sort(function(a, b){ return a - b; });
+
+  this.times = all.slice(-Math.max(1, this.wanted));
+  if(this.idx >= this.times.length) this.idx = Math.max(0, this.times.length - 1);
+  this.on.built(this);
 };
 
 RadarLoop.prototype.show = function(i){
   var n = this.times.length;
   if(!n) return;
   i = ((i % n) + n) % n;
-
-  var self = this;
-  this.frames.forEach(function(l, k){ l.setOpacity(k === i ? self.opacity : 0); });
   this.idx = i;
-  this.on.show(this.times[i], i, n);
+
+  var t = this.times[i];
+  this.tracks.forEach(function(tr){ tr.showAt(t); });
+  this.on.show(t, i, n);
 };
 
 RadarLoop.prototype._tick = function(){
@@ -426,116 +621,42 @@ RadarLoop.prototype.pause = function(){
 
 RadarLoop.prototype.toggle = function(){ this.playing ? this.pause() : this.play(); };
 
-RadarLoop.prototype.setOpacity = function(v){ this.opacity = v; this.show(this.idx); };
-
 RadarLoop.prototype.setFps = function(v){
   this.fps = v;
   if(this.playing){ this.pause(); this.play(); }
 };
 
-/*  Toutes les couches annoncées ne sont pas forcément servies : si GeoMet
-    refuse la nouvelle, on revient à la précédente plutôt que de laisser la
-    carte vide. Le rappel `error` a déjà prévenu l'utilisateur.           */
-RadarLoop.prototype.setProduct = async function(id){
-  var previous = this.product;
-  if(id === previous) return true;
-
-  this.product = id;
-  this.pause();
-  if(await this.build()) return true;
-
-  var why = this.lastError;    // le build de repli va l'effacer
-  this.product = previous;
-  await this.build();
-  this.lastError = why;
-  return false;
-};
-
-RadarLoop.prototype.setWanted = function(n){
+RadarLoop.prototype.setWanted = async function(n){
   this.wanted = n;
-  return this.build();
+  var self = this;
+  for(var i = 0; i < this.tracks.length; i++){
+    try { await this.tracks[i].build(n, function(r){ self.on.progress(r); }); }
+    catch(e){ this.lastError = e; this.on.error(e); }
+  }
+  this.retime();
+  this.show(this.times.length - 1);
 };
 
-/* Ajoute les images parues depuis le dernier appel sans rebâtir la pile. */
 RadarLoop.prototype.refresh = async function(){
-  if(!this.times.length) return this.build();
+  if(!this.tracks.length) return false;
 
-  var data;
-  try { data = await fetchTimes(this.product, this.wanted); }
-  catch(e){ return false; }
-
-  var newest = data.times[data.times.length - 1].getTime();
-  if(newest === this.times[this.times.length - 1].getTime()) return false;
-
-  var self    = this;
-  var wasLive = this.idx === this.times.length - 1;
-  var known   = {};
-  this.times.forEach(function(d){ known[d.getTime()] = true; });
-
-  data.times.forEach(function(d){
-    if(known[d.getTime()]) return;
-    var l = self._frame(d);
-    l.addTo(self.map);
-    self.times.push(d);
-    self.frames.push(l);
-  });
-
-  while(this.times.length > this.wanted){
-    this.map.removeLayer(this.frames.shift());
-    this.times.shift();
-    this.idx = Math.max(0, this.idx - 1);
+  var changed = false;
+  for(var i = 0; i < this.tracks.length; i++){
+    try { if(await this.tracks[i].refresh(this.wanted)) changed = true; }
+    catch(e){ /* une piste muette ne doit pas arrêter les autres */ }
   }
+  if(!changed) return false;
 
-  this.on.built(this);
+  var wasLive = this.idx === this.times.length - 1;
+  this.retime();
   this.show(wasLive ? this.times.length - 1 : this.idx);
   return true;
 };
 
-RadarLoop.prototype.legendUrl = function(){
-  return GEOMET + "?version=1.3.0&service=WMS&request=GetLegendGraphic"
-       + "&sld_version=1.1.0&format=image/png&layer=" + encodeURIComponent(this.product);
+/* Une lecture par piste : superposées, elles répondent chacune la sienne. */
+RadarLoop.prototype.valueAt = function(latlng){
+  return Promise.all(this.tracks.map(function(t){ return t.valueAt(latlng); }));
 };
-
-/* Lecture ponctuelle : intensité sous le point cliqué, à l'image affichée. */
-RadarLoop.prototype.valueAt = async function(latlng){
-  if(!this.times.length) throw new Error("aucune image");
-
-  var size = this.map.getSize();
-  var b    = this.map.getBounds();
-  var sw   = L.CRS.EPSG3857.project(b.getSouthWest());
-  var ne   = L.CRS.EPSG3857.project(b.getNorthEast());
-  var pt   = this.map.latLngToContainerPoint(latlng);
-
-  var q = new URLSearchParams({
-    service: "WMS", version: "1.3.0", request: "GetFeatureInfo",
-    layers: this.product, query_layers: this.product,
-    crs: "EPSG:3857",
-    bbox: [sw.x, sw.y, ne.x, ne.y].join(","),
-    width: size.x, height: size.y,
-    i: Math.round(pt.x), j: Math.round(pt.y),
-    info_format: "application/json",
-    time: isoZ(this.times[this.idx])
-  });
-
-  var res = await fetch(GEOMET + "?" + q.toString());
-  var txt = await res.text();
-  var value = null;
-
-  try {
-    var j = JSON.parse(txt);
-    var p = (j.features && j.features[0] && j.features[0].properties) || {};
-    for(var k in p){
-      var v = parseFloat(p[k]);
-      if(!isNaN(v)){ value = v; break; }
-    }
-  } catch(e){
-    var m = /-?\d+(\.\d+)?/.exec(txt);
-    if(m) value = parseFloat(m[0]);
-  }
-
-  return { value: value, unit: this.info().unit };
-};
-
 /* --------------------------------------------------------------- exports */
 global.RadarCore = {
   VERSION: VERSION,
@@ -544,7 +665,6 @@ global.RadarCore = {
   CARTO: CARTO,
   TZ: TZ,
   PRODUCTS: PRODUCTS,
-  findProduct: findProduct,
   MAX_FRAMES: MAX_FRAMES,
   Prefs: Prefs,
   isoZ: isoZ,
@@ -557,6 +677,8 @@ global.RadarCore = {
   scanLayers: scanLayers,
   remember: remember,
   guessUnit: guessUnit,
+  metaFor: metaFor,
+  Track: Track,
   expandTimeDimension: expandTimeDimension,
   durationMs: durationMs,
   timeAxisFrom: timeAxisFrom,

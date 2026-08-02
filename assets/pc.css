@@ -158,13 +158,6 @@ input[type=range]:focus-visible{ outline:2px solid var(--bone); outline-offset:4
   display:block; margin-bottom:9px;
   padding-bottom:6px; border-bottom:1px solid var(--rule);
 }
-/* Intertitre à l'intérieur d'un groupe : sépare les grandeurs mesurées. */
-.subhead{
-  font-size:11px; color:var(--dim);
-  margin:2px 0 2px; padding-top:6px;
-}
-.subhead:first-child{ padding-top:0 }
-
 .opt{
   display:flex; align-items:center; gap:9px;
   padding:5px 0; cursor:pointer;
@@ -212,6 +205,49 @@ input[type=range]:focus-visible{ outline:2px solid var(--bone); outline-offset:4
 
 .hint{ font-size:11px; color:var(--dimmer); line-height:1.45; margin-top:7px }
 
+/* ------------------------------------------------- pile des couches animées */
+.track-row{
+  border:1px solid var(--rule);
+  border-radius:2px;
+  padding:8px 9px;
+  margin-bottom:8px;
+  background:var(--ink);
+}
+.track-head{ display:flex; align-items:center; gap:8px }
+.track-id{ font-size:11px; color:var(--bone); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.track-del{
+  margin-left:auto; flex:0 0 auto;
+  background:none; border:0; color:var(--dimmer);
+  font-size:16px; line-height:1; padding:0 2px; cursor:pointer;
+}
+.track-del:hover{ color:var(--live) }
+.track-title{ font-size:10.5px; color:var(--dimmer); line-height:1.35; margin:3px 0 7px }
+.track-row .row{ gap:9px }
+.track-row input[type=range]{ width:auto; flex:1 1 auto; min-width:0 }
+.track-val{ min-width:38px }
+
+.quick-add{
+  display:inline-block;
+  background:var(--panel-2);
+  border:1px solid var(--rule);
+  color:var(--dim);
+  font-family:inherit; font-size:11px;
+  padding:5px 9px; margin:0 6px 6px 0;
+  border-radius:2px; cursor:pointer;
+}
+.quick-add:hover{ background:#262b31; color:var(--bone) }
+
+/* ------------------------------------------------------ lecture au point */
+.readout-line{ display:flex; align-items:baseline; gap:8px; margin-bottom:4px }
+.readout-line .rl-id{ font-size:9.5px; color:var(--dimmer); flex:1 1 auto;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.readout-line .v{ font-family:"IBM Plex Mono",monospace; font-size:14px;
+  color:var(--bone); flex:0 0 auto }
+
+/* ------------------------------------------------------------- légendes */
+.legend-item + .legend-item{ margin-top:8px; padding-top:8px; border-top:1px solid var(--rule) }
+.legend-cap{ font-size:9px; color:var(--dimmer); margin-bottom:4px }
+
 /* ------------------------------------------------------ liste du catalogue */
 #cat-list{ max-height:280px; overflow-y:auto; margin-top:8px }
 #cat-list:not(:empty){ border-top:1px solid var(--rule) }
@@ -257,7 +293,7 @@ input[type=range]:focus-visible{ outline:2px solid var(--bone); outline-offset:4
   border:1px solid var(--rule);
   border-radius:2px;
   padding:11px 13px;
-  max-width:230px;
+  max-width:250px;
   display:none;
 }
 #readout .eyebrow{ display:block; margin-bottom:6px }
@@ -272,7 +308,8 @@ input[type=range]:focus-visible{ outline:2px solid var(--bone); outline-offset:4
   padding:8px;
   display:none;
 }
-#legend img{ display:block; max-height:min(340px,42vh); width:auto }
+#legend{ max-height:min(420px,56vh); overflow-y:auto }
+#legend img{ display:block; max-height:min(300px,34vh); width:auto }
 
 /* Repli de courtoisie : si le bureau est ouvert sur un écran étroit, la mise
    en page reste utilisable, mais la version mobile est proposée. */

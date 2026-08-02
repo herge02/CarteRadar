@@ -27,30 +27,30 @@ html,body{ overscroll-behavior:none }
   z-index:1000;
 }
 
-/* sélecteur de produit, deux segments */
-#prod{
-  display:flex; flex:1 1 auto; min-width:0;
+/* bouton de pile : compte et résumé des couches animées */
+#stack-btn{
+  display:flex; align-items:baseline; gap:8px;
+  flex:1 1 auto; min-width:0;
   background:var(--ink);
   border:1px solid var(--rule);
   border-radius:3px;
-  padding:2px;
-  gap:2px;
-}
-#prod label{ flex:1 1 0; min-width:0 }
-#prod input{ position:absolute; opacity:0; pointer-events:none }
-#prod span{
-  display:block;
-  padding:8px 6px;
-  text-align:center;
-  font-size:12px; font-weight:600;
-  letter-spacing:.1em; text-transform:uppercase;
-  color:var(--dim);
-  border-radius:2px;
+  padding:9px 11px;
+  color:var(--bone);
+  font-family:inherit;
   cursor:pointer;
-  white-space:nowrap;
+  text-align:left;
 }
-#prod input:checked + span{ background:var(--panel-2); color:var(--bone) }
-#prod input:focus-visible + span{ outline:2px solid var(--bone); outline-offset:2px }
+#stack-count{
+  flex:0 0 auto;
+  font-size:15px; font-weight:600; line-height:1;
+}
+#stack-names{
+  flex:1 1 auto; min-width:0;
+  font-size:11px; font-weight:600;
+  letter-spacing:.08em; text-transform:uppercase;
+  color:var(--dim);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
 
 .icon-btn{
   flex:0 0 auto;
@@ -88,7 +88,10 @@ html,body{ overscroll-behavior:none }
   padding:6px;
   display:none;
 }
-#legend img{ display:block; max-height:34vh; width:auto }
+#legend{ max-height:44dvh; overflow-y:auto }
+#legend img{ display:block; max-height:26dvh; width:auto }
+.legend-item + .legend-item{ margin-top:8px; padding-top:8px; border-top:1px solid var(--rule) }
+.legend-cap{ font-size:10px; color:var(--dimmer); margin-bottom:4px }
 
 /* Remonté pour laisser passer la ligne d'attribution de Leaflet. */
 #readout{
@@ -98,10 +101,14 @@ html,body{ overscroll-behavior:none }
   border-radius:3px;
   padding:10px 12px;
   display:none;
-  align-items:baseline; gap:10px;
+  max-height:40dvh; overflow-y:auto;
 }
-#readout .v{ font-family:"IBM Plex Mono",monospace; font-size:18px; color:var(--bone) }
-#readout .c{ font-family:"IBM Plex Mono",monospace; font-size:10px; color:var(--dimmer); margin-left:auto; text-align:right }
+.readout-line{ display:flex; align-items:baseline; gap:10px; margin-bottom:5px }
+.readout-line .rl-id{ font-size:10px; color:var(--dimmer); flex:1 1 auto;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.readout-line .v{ font-family:"IBM Plex Mono",monospace; font-size:16px;
+  color:var(--bone); flex:0 0 auto }
+#readout .c{ font-size:10px; color:var(--dimmer); margin-top:6px }
 
 /* ------------------------------------------------------------- bande basse */
 #dock{
@@ -305,6 +312,36 @@ html,body{ overscroll-behavior:none }
 }
 
 .hint{ font-size:12px; color:var(--dimmer); line-height:1.5; margin-top:9px }
+
+/* ------------------------------------------------- pile des couches animées */
+.track-row{
+  border:1px solid var(--rule);
+  border-radius:3px;
+  padding:11px 12px;
+  margin-bottom:10px;
+  background:var(--ink);
+}
+.track-head{ display:flex; align-items:center; gap:10px }
+.track-id{ font-size:13px; color:var(--bone); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.track-del{
+  margin-left:auto; flex:0 0 auto;
+  background:none; border:0; color:var(--dimmer);
+  font-size:22px; line-height:1; padding:0 8px; cursor:pointer;
+}
+.track-title{ font-size:12px; color:var(--dimmer); line-height:1.4; margin:4px 0 2px }
+.track-row .slider{ padding:4px 0 0 }
+.track-row .slider .eyebrow{ flex:0 0 54px }
+.track-val{ min-width:46px }
+
+.quick-add{
+  display:inline-block;
+  background:var(--panel-2);
+  border:1px solid var(--rule);
+  color:var(--dim);
+  font-family:inherit; font-size:13px;
+  padding:9px 12px; margin:0 8px 8px 0;
+  border-radius:3px; cursor:pointer;
+}
 
 /* ------------------------------------------------------ liste du catalogue */
 #cat-list{ max-height:46dvh; overflow-y:auto; margin-top:10px }
