@@ -52,18 +52,21 @@ profite donc aux deux versions.
 
 ## Fonctions
 
-- **Produits** : quatre composites 1 km, croisant deux grandeurs et deux
-  hypothèses de phase. « Pluie » et « neige » désignent la table de conversion
-  appliquée à l'écho, pas ce qui tombe réellement.
-
-  | Grandeur | Pluie | Neige |
-  |---|---|---|
-  | Taux de précipitation | `RADAR_1KM_RRAI` — mm/h | `RADAR_1KM_RSNO` — cm/h |
-  | Réflectivité | `RADAR_1KM_RDBR` — dBZ | `RADAR_1KM_RDBS` — dBZ |
+- **Produits** : deux composites 1 km — `RADAR_1KM_RRAI` (mm/h) et
+  `RADAR_1KM_RSNO` (cm/h). « Pluie » et « neige » désignent la table de
+  conversion appliquée à l'écho, pas ce qui tombe réellement.
 
   La liste vit dans `PRODUCTS`, au début de `assets/radar-core.js` : une ligne
-  de plus la fait apparaître dans les deux interfaces. Si GeoMet refuse une
-  couche, la console revient au produit précédent et le dit.
+  de plus la fait apparaître dans les deux interfaces, et les intitulés de
+  grandeur reparaissent d'eux-mêmes dès qu'il y en a plus d'une. Si GeoMet
+  refuse une couche, la console revient au produit précédent et affiche la
+  cause ; un produit retiré du catalogue mais resté dans les préférences est
+  ignoré au démarrage.
+
+  **N'y inscrire qu'un identifiant relevé dans le `GetCapabilities` du
+  service.** Deux couches de réflectivité en dBZ y ont figuré sur la foi d'un
+  annuaire tiers qui republie GeoMet ; le service les refuse avec
+  `InvalidLayersParameter`. Un annuaire tiers n'est pas le catalogue.
 - **Boucle** : jusqu'à 30 images, soit les trois dernières heures. Arrêt d'une
   seconde et demie sur la dernière image avant de reboucler, comme les boucles
   d'ECCC.

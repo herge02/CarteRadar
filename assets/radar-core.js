@@ -8,23 +8,27 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "5";
+var VERSION = "6";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
 var ATTR   = 'Radar © <a href="https://eccc-msc.github.io/open-data/" target="_blank" rel="noopener">ECCC / GeoMet</a>';
 var CARTO  = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
-/*  Les quatre composites 1 km de GeoMet, croisant deux grandeurs et deux
-    hypothèses de phase. Toute l'interface se construit à partir d'ici :
-    ajouter une ligne suffit à faire apparaître le produit des deux côtés.
-    « pluie » et « neige » désignent la table de conversion appliquée à
-    l'écho, pas ce qui tombe réellement.                                  */
+/*  Composites 1 km de GeoMet. Toute l'interface se construit à partir d'ici :
+    ajouter une ligne suffit à faire apparaître le produit des deux côtés,
+    et les intitulés de grandeur s'effacent d'eux-mêmes s'il n'en reste
+    qu'une. « pluie » et « neige » désignent la table de conversion appliquée
+    à l'écho, pas ce qui tombe réellement.
+
+    N'inscrire ici qu'un identifiant relevé dans le GetCapabilities du
+    service. Deux couches de réflectivité, RADAR_1KM_RDBR et RADAR_1KM_RDBS,
+    ont été ajoutées sur la foi d'un annuaire tiers : GeoMet les refuse avec
+    « InvalidLayersParameter — Couche non disponible ». Elles sont retirées
+    en attendant les vrais identifiants.                                  */
 var PRODUCTS = {
   RADAR_1KM_RRAI: { quantity:"Taux de précipitation", phase:"Pluie", unit:"mm/h", coverage:"RADAR_COVERAGE_RRAI.INV" },
-  RADAR_1KM_RSNO: { quantity:"Taux de précipitation", phase:"Neige", unit:"cm/h", coverage:"RADAR_COVERAGE_RSNO.INV" },
-  RADAR_1KM_RDBR: { quantity:"Réflectivité",          phase:"Pluie", unit:"dBZ",  coverage:"RADAR_COVERAGE_RRAI.INV" },
-  RADAR_1KM_RDBS: { quantity:"Réflectivité",          phase:"Neige", unit:"dBZ",  coverage:"RADAR_COVERAGE_RSNO.INV" }
+  RADAR_1KM_RSNO: { quantity:"Taux de précipitation", phase:"Neige", unit:"cm/h", coverage:"RADAR_COVERAGE_RSNO.INV" }
 };
 
 /* Retrouve l'identifiant à partir du couple grandeur / phase. */
@@ -82,6 +86,14 @@ function panes(map){
   map.createPane("static"); map.getPane("static").style.zIndex = 380;
   map.createPane("labels"); map.getPane("labels").style.zIndex = 460;
   map.getPane("labels").style.pointerEvents = "none";
+}
+
+/*  Premier élément portant ce nom local, préfixé ou non. getElementsByTagName
+    compare le nom qualifié : sur <ogc:ServiceException>, il ne trouve rien. */
+function pickAny(xml, tag){
+  return xml.getElementsByTagName(tag)[0]
+      || xml.getElementsByTagNameNS("*", tag)[0]
+      || null;
 }
 
 /*  Cherche un élément par nom local, que le document soit muni d'espaces de
@@ -147,10 +159,15 @@ async function fetchTimes(product, wanted){
   var body = await res.text();
   var xml  = new DOMParser().parseFromString(body, "text/xml");
 
-  /* GeoMet répond parfois 200 en portant un rapport d'exception OGC. */
-  var exc = xml.getElementsByTagName("ServiceException")[0]
-         || xml.getElementsByTagName("ExceptionText")[0];
-  if(exc) throw new Error("refus de GeoMet : " + exc.textContent.trim().slice(0, 120));
+  /*  GeoMet répond 200 en portant un rapport d'exception OGC, dont les
+      éléments sont préfixés : <ogc:ServiceException>. Une recherche par nom
+      qualifié les manquerait — d'où la recherche par nom local.          */
+  var exc = pickAny(xml, "ServiceException") || pickAny(xml, "ExceptionText");
+  if(exc){
+    var code = exc.getAttribute("code") || exc.getAttribute("exceptionCode") || "";
+    throw new Error("refus de GeoMet" + (code ? " (" + code + ")" : "")
+                  + " : " + exc.textContent.trim().slice(0, 120));
+  }
 
   var raw = timeAxisFrom(xml);
   if(!raw) throw new Error("aucun axe temps dans la réponse [" + describeDoc(xml) + "]");

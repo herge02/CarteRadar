@@ -12,8 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=5">
-<link rel="stylesheet" href="/assets/pc.css?v=5">
+<link rel="stylesheet" href="/assets/theme.css?v=6">
+<link rel="stylesheet" href="/assets/pc.css?v=6">
 </head>
 <body>
 
@@ -121,7 +121,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=5"></script>
+<script src="/assets/radar-core.js?v=6"></script>
 <script>
 (function(){
 "use strict";
@@ -171,8 +171,12 @@ function toast(msg){
 }
 
 /* ------------------------------------------------------------ la boucle */
+/* Un produit retiré du catalogue peut survivre dans les préférences : sans
+   ce filtre, la console démarrerait sur une couche que GeoMet refuse. */
+var startProduct = C.PRODUCTS[prefs.product] ? prefs.product : "RADAR_1KM_RRAI";
+
 var loop = new C.RadarLoop(map, {
-  product: prefs.product || "RADAR_1KM_RRAI",
+  product: startProduct,
   wanted : prefs.wanted  || 30,
   fps    : prefs.fps     || 5,
   opacity: prefs.opacity != null ? prefs.opacity : 0.78,
@@ -324,11 +328,15 @@ $("#frames").oninput = function(e){
     (groups[q] = groups[q] || []).push(id);
   });
 
-  Object.keys(groups).forEach(function(q){
-    var head = document.createElement("div");
-    head.className = "subhead";
-    head.textContent = q;
-    host.appendChild(head);
+  var quantities = Object.keys(groups);
+  quantities.forEach(function(q){
+    /* Un seul intitulé de grandeur n'apprend rien : on l'omet. */
+    if(quantities.length > 1){
+      var head = document.createElement("div");
+      head.className = "subhead";
+      head.textContent = q;
+      host.appendChild(head);
+    }
 
     groups[q].forEach(function(id){
       var p = C.PRODUCTS[id];

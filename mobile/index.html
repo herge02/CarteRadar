@@ -15,8 +15,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=5">
-<link rel="stylesheet" href="/assets/mobile.css?v=5">
+<link rel="stylesheet" href="/assets/theme.css?v=6">
+<link rel="stylesheet" href="/assets/mobile.css?v=6">
 </head>
 <body>
 
@@ -88,14 +88,9 @@
   <h2>Console radar</h2>
   <div class="sub">ECCC · composite 1 km · MAJ 6 min</div>
 
-  <div class="group">
+  <div class="group" id="quantity-group" hidden>
     <span class="eyebrow">Grandeur mesurée</span>
-    <label class="opt"><input type="radio" name="quantity" value="Taux de précipitation" checked>
-      Taux de précipitation <span class="unit">mm/h · cm/h</span></label>
-    <label class="opt"><input type="radio" name="quantity" value="Réflectivité">
-      Réflectivité <span class="unit">dBZ</span></label>
-    <p class="hint">Le taux convertit l'écho en précipitation au sol. La réflectivité
-      montre l'écho brut : plus fidèle à ce que voit le radar, notamment en altitude.</p>
+    <div id="quantity-list"></div>
   </div>
 
   <div class="group">
@@ -152,7 +147,7 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=5"></script>
+<script src="/assets/radar-core.js?v=6"></script>
 <script>
 (function(){
 "use strict";
@@ -202,8 +197,12 @@ function toast(msg){
 /* ------------------------------------------------------------- la boucle */
 /* Sur mobile on charge moins d'images par défaut : chaque image est une
    requête WMS par tuile visible, et la donnée cellulaire se paie. */
+/* Un produit retiré du catalogue peut survivre dans les préférences : sans
+   ce filtre, la console démarrerait sur une couche que GeoMet refuse. */
+var startProduct = C.PRODUCTS[prefs.product] ? prefs.product : "RADAR_1KM_RRAI";
+
 var loop = new C.RadarLoop(map, {
-  product: prefs.product || "RADAR_1KM_RRAI",
+  product: startProduct,
   wanted : prefs.wantedMobile || 15,
   fps    : prefs.fps     || 5,
   opacity: prefs.opacity != null ? prefs.opacity : 0.78,
@@ -307,6 +306,34 @@ $("#frames").oninput = function(e){
    la grandeur mesurée, dans la feuille de réglages. */
 var choice = { phase: loop.info().phase || "Pluie",
                quantity: loop.info().quantity || "Taux de précipitation" };
+
+/*  Les grandeurs sont engendrées depuis RadarCore.PRODUCTS. Tant qu'il n'y
+    en a qu'une, le groupe reste caché : proposer un choix unique n'est pas
+    un choix. Il reparaîtra dès qu'une seconde grandeur sera inscrite.    */
+(function buildQuantities(){
+  var seen = [], units = {};
+  Object.keys(C.PRODUCTS).forEach(function(id){
+    var p = C.PRODUCTS[id];
+    if(seen.indexOf(p.quantity) === -1) seen.push(p.quantity);
+    var u = units[p.quantity] = units[p.quantity] || [];
+    if(u.indexOf(p.unit) === -1) u.push(p.unit);
+  });
+  if(seen.length < 2) return;
+
+  var host = $("#quantity-list");
+  seen.forEach(function(q){
+    var lab = document.createElement("label");
+    lab.className = "opt";
+    lab.innerHTML = '<input type="radio" name="quantity"><span></span><span class="unit"></span>';
+    var input = lab.querySelector("input");
+    input.value = q;
+    input.checked = q === choice.quantity;
+    lab.querySelectorAll("span")[0].textContent = q;
+    lab.querySelector(".unit").textContent = units[q].join(" · ");
+    host.appendChild(lab);
+  });
+  $("#quantity-group").hidden = false;
+})();
 
 function syncProductInputs(){
   var set = function(name, value){
