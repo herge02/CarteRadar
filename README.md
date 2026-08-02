@@ -18,6 +18,7 @@ La racine `/` détecte l'appareil et redirige. Le choix est mémorisé.
 
 ```
 index.html                 aiguillage /pc ou /mobile
+api/planes.js              relais serveur pour le trafic aérien (contournement CORS)
 pc/index.html              console bureau
 mobile/index.html          console mobile
 assets/radar-core.js       moteur commun : GeoMet, boucle d'images, fonds de carte
@@ -109,9 +110,21 @@ profite donc aux deux versions.
   rien n'est inventé pour combler.
 
   Les relevés sont pris toutes les 15 secondes, jamais en arrière-plan, et
-  conservés dans un tampon daté. Si la source refuse les requêtes venues d'un
-  navigateur, faute d'en-têtes CORS, le message le dit : c'est la source, pas
-  la console.
+  conservés dans un tampon daté. Deux sources sont proposées, `adsb.lol` et
+  `airplanes.live` : si l'une flanche, l'autre est à un clic.
+
+  **Ces flux passent par `api/planes.js`, pas en direct.** Ils ne renvoient
+  aucun en-tête `Access-Control-Allow-Origin`, et un navigateur refuse donc de
+  lire leur réponse — l'appel échoue en « Failed to fetch », sans code HTTP.
+  Le relais fait la requête côté serveur, où la politique d'origine ne
+  s'applique pas. C'est le seul morceau du projet qui ne tourne pas chez le
+  visiteur. Aucune clé n'y est en jeu : ces sources sont ouvertes, le relais
+  contourne le CORS, il ne cache pas un secret.
+
+  Le relais borne le rayon à 250 milles nautiques et n'accepte que les deux
+  hôtes nommés — un client ne peut pas s'en servir pour atteindre autre chose.
+  Ses réponses sont mises en cache dix secondes en périphérie, pour que
+  plusieurs onglets ne martèlent pas une source tenue par des bénévoles.
 - **Mémoire** : la pile de couches avec leurs opacités, la vitesse, le fond de
   carte et la dernière position sont conservés dans le navigateur. Une couche
   que le service ne sert plus est signalée au rechargement, pas subie.
@@ -135,14 +148,19 @@ Aucune étape de compilation.
 4. Déployer.
 
 `vercel.json` active `cleanUrls`, ce qui donne les adresses `/pc` et `/mobile`
-sans le suffixe `.html`.
+sans le suffixe `.html`. Vercel détecte seul le contenu de `api/` et le déploie
+en fonction serverless — rien à configurer.
+
+Le trafic aérien est la seule fonction qui en dépende : sur un hébergement
+purement statique, la console fonctionne, mais le trafic annonce que le relais
+n'est pas déployé.
 
 ### Cache
 
 Les pages et les fichiers de `assets/` sont servis en `no-cache` : le
 navigateur les garde, mais revalide avant chaque usage, et reçoit un 304 tant
 que rien n'a changé. Les liens vers `assets/` portent en plus une marque de
-version (`?v=9`).
+version (`?v=10`).
 
 Cette prudence a une raison. Un `stale-while-revalidate` généreux sur les
 assets a déjà servi un `radar-core.js` périmé avec un HTML à jour : les deux
@@ -161,7 +179,8 @@ python3 -m http.server 8080
 ```
 
 Les adresses deviennent alors `/pc/` et `/mobile/` — le serveur intégré de
-Python ne fait pas d'URL propres, mais les pages fonctionnent.
+Python ne fait pas d'URL propres, et `/api/planes` n'existe pas, mais tout le
+reste fonctionne.
 
 ## Forcer une version
 

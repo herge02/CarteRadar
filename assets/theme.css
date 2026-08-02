@@ -126,6 +126,17 @@ body{
 .leaflet-tooltip.plane-tip::before{ border-top-color:var(--rule) }
 .leaflet-tooltip.plane-tip b{ color:var(--bone); font-weight:600 }
 
+select{
+  background:var(--ink);
+  border:1px solid var(--rule);
+  color:var(--bone);
+  font-family:"IBM Plex Mono",monospace;
+  font-size:11px;
+  padding:5px 6px;
+  border-radius:2px;
+  cursor:pointer;
+}
+
 /*  Échelle des bandes d'altitude : la couleur ne porte jamais seule, chaque
     palier est nommé.                                                      */
 .alt-legend{ margin-top:9px }

@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "9";
+var VERSION = "10";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -668,21 +668,14 @@ RadarLoop.prototype.valueAt = function(latlng){
    à la position enregistrée la plus proche de cet instant. Avant l'ouverture
    de la page, rien n'est connu, et rien n'est inventé.                     */
 
+/*  Les sources sont interrogées par le relais /api/planes, et non en direct :
+    aucune ne renvoie d'en-tête CORS, un navigateur ne peut donc pas lire
+    leur réponse lui-même. Voir api/planes.js.                            */
+var PLANE_RELAY = "/api/planes";
+
 var PLANE_SOURCES = {
-  "adsb.lol": {
-    label: "adsb.lol",
-    url: function(lat, lon, nm){
-      return "https://api.adsb.lol/v2/lat/" + lat.toFixed(4)
-           + "/lon/" + lon.toFixed(4) + "/dist/" + Math.round(Math.min(nm, 250));
-    }
-  },
-  "airplanes.live": {
-    label: "airplanes.live",
-    url: function(lat, lon, nm){
-      return "https://api.airplanes.live/v2/point/" + lat.toFixed(4)
-           + "/" + lon.toFixed(4) + "/" + Math.round(Math.min(nm, 250));
-    }
-  }
+  "adsb.lol":       { label: "adsb.lol" },
+  "airplanes.live": { label: "airplanes.live" }
 };
 
 /*  Bandes d'altitude, en pieds. Rampe séquentielle bleue à teinte unique,
@@ -829,21 +822,29 @@ Aircraft.prototype.poll = async function(){
   if(!this.enabled) return false;
 
   var c = this.map.getCenter();
-  var url = PLANE_SOURCES[this.source].url(c.lat, c.lng, this.radius);
+  var url = PLANE_RELAY + "?source=" + encodeURIComponent(this.source)
+          + "&lat=" + c.lat.toFixed(4) + "&lon=" + c.lng.toFixed(4)
+          + "&dist=" + Math.round(this.radius);
 
   var data;
   try {
     var res = await fetch(url, { headers: { "Accept": "application/json" } });
-    if(!res.ok) throw new Error("HTTP " + res.status);
+
+    if(res.status === 404){
+      throw new Error("le relais /api/planes n'est pas déployé — "
+                    + "cette page est-elle servie par Vercel ?");
+    }
+    if(!res.ok){
+      var why = "";
+      try { why = (await res.json()).error || ""; } catch(_){}
+      throw new Error(why || ("relais : HTTP " + res.status));
+    }
     data = await res.json();
+
   } catch(e){
     this.lastError = e;
-    /*  Une source tierce peut refuser la requête depuis un navigateur faute
-        d'en-têtes CORS. Le message doit le dire, car ce n'est pas une panne
-        de la console.                                                     */
     this.on.error(e);
-    this.on.status("Trafic indisponible : " + e.message
-      + ". Si l'erreur persiste, la source refuse peut-être les requêtes depuis un navigateur.");
+    this.on.status("Trafic indisponible — " + e.message);
     return false;
   }
 

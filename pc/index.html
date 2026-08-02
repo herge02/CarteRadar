@@ -12,8 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=9">
-<link rel="stylesheet" href="/assets/pc.css?v=9">
+<link rel="stylesheet" href="/assets/theme.css?v=10">
+<link rel="stylesheet" href="/assets/pc.css?v=10">
 </head>
 <body>
 
@@ -48,6 +48,13 @@
     </div>
     <label class="opt" id="planes-follow-row" hidden><input type="checkbox" id="planes-follow">
       Suivre la boucle</label>
+    <div class="row" id="planes-source-row" hidden style="margin-top:8px">
+      <span class="eyebrow" style="flex:0 0 auto">Source</span>
+      <select id="planes-source" aria-label="Source du trafic aérien">
+        <option value="adsb.lol">adsb.lol</option>
+        <option value="airplanes.live">airplanes.live</option>
+      </select>
+    </div>
     <div class="alt-legend" id="alt-legend" hidden></div>
     <p class="hint" id="planes-status">Source ADS-B communautaire, étrangère à GeoMet.
       Les positions ne sont relevées que pendant que la page est ouverte : remonter
@@ -147,7 +154,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=9"></script>
+<script src="/assets/radar-core.js?v=10"></script>
 <script>
 (function(){
 "use strict";
@@ -217,6 +224,7 @@ var loop = new C.RadarLoop(map, {
 var planes = new C.Aircraft(map, {
   radius: prefs.planesRadius || 120,
   follow: !!prefs.planesFollow,
+  source: prefs.planesSource,
   on: {
     status: function(msg){ $("#planes-status").textContent = msg; },
     count : function(n){ planeCount = n; }
@@ -241,6 +249,7 @@ buildAltLegend();
 $("#planes-on").onchange = function(e){
   $("#planes-radius-row").hidden = !e.target.checked;
   $("#planes-follow-row").hidden = !e.target.checked;
+  $("#planes-source-row").hidden = !e.target.checked;
   $("#alt-legend").hidden = !e.target.checked;
   C.Prefs.write({ planesOn: e.target.checked });
   if(e.target.checked){
@@ -273,6 +282,16 @@ $("#planes-follow").onchange = function(e){
   $("#planes-status").textContent = e.target.checked
     ? "Les avions suivent la boucle : rien avant l'ouverture de la page."
     : "Les avions restent en direct, quelle que soit l'image affichée.";
+};
+
+$("#planes-source").value = planes.source;
+$("#planes-source").onchange = function(e){
+  planes.source = e.target.value;
+  C.Prefs.write({ planesSource: e.target.value });
+  if(planes.enabled){
+    $("#planes-status").textContent = "Interrogation de " + planes.sourceLabel() + "…";
+    planes.poll();
+  }
 };
 
 map.on("moveend", function(){ if(planes.enabled) planes.poll(); });
