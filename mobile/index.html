@@ -15,8 +15,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=8">
-<link rel="stylesheet" href="/assets/mobile.css?v=8">
+<link rel="stylesheet" href="/assets/theme.css?v=9">
+<link rel="stylesheet" href="/assets/mobile.css?v=9">
 </head>
 <body>
 
@@ -108,6 +108,22 @@
   </div>
 
   <div class="group">
+    <span class="eyebrow">Trafic aérien</span>
+    <label class="opt"><input type="checkbox" id="planes-on"> Passage d'avions</label>
+    <div class="slider" id="planes-radius-row" hidden>
+      <span class="eyebrow">Rayon</span>
+      <input type="range" id="planes-radius" min="20" max="250" step="10" value="120">
+      <span class="val" id="planes-radius-val">120 NM</span>
+    </div>
+    <label class="opt" id="planes-follow-row" hidden><input type="checkbox" id="planes-follow">
+      Suivre la boucle</label>
+    <div class="alt-legend" id="alt-legend" hidden></div>
+    <p class="hint" id="planes-status">Source ADS-B communautaire, étrangère à GeoMet.
+      Les positions ne sont relevées que pendant que la page est ouverte. Un relevé
+      toutes les 15 s consomme des données.</p>
+  </div>
+
+  <div class="group">
     <span class="eyebrow">Fond de carte</span>
     <label class="opt"><input type="radio" name="base" value="dark" checked> Sombre</label>
     <label class="opt"><input type="radio" name="base" value="light"> Clair</label>
@@ -148,7 +164,7 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=8"></script>
+<script src="/assets/radar-core.js?v=9"></script>
 <script>
 (function(){
 "use strict";
@@ -215,6 +231,64 @@ var loop = new C.RadarLoop(map, {
   }
 });
 
+/* ------------------------------------------------------------ trafic aérien */
+var planes = new C.Aircraft(map, {
+  radius: prefs.planesRadius || 120,
+  follow: !!prefs.planesFollow,
+  on: { status: function(msg){ $("#planes-status").textContent = msg; } }
+});
+
+(function buildAltLegend(){
+  var host = $("#alt-legend");
+  C.ALT_BANDS.forEach(function(b){
+    var row = document.createElement("div");
+    row.className = "band";
+    row.innerHTML = '<span class="sw"></span><span class="lb"></span>';
+    row.querySelector(".sw").style.background = b.color;
+    row.querySelector(".lb").textContent = b.label;
+    host.appendChild(row);
+  });
+})();
+
+$("#planes-on").onchange = function(e){
+  $("#planes-radius-row").hidden = !e.target.checked;
+  $("#planes-follow-row").hidden = !e.target.checked;
+  $("#alt-legend").hidden = !e.target.checked;
+  C.Prefs.write({ planesOn: e.target.checked });
+  if(e.target.checked){
+    planes.enable();
+    $("#planes-status").textContent = "Interrogation de " + planes.sourceLabel() + "…";
+  } else {
+    planes.disable();
+    $("#planes-status").textContent = "Trafic éteint.";
+  }
+};
+
+$("#planes-radius").value = planes.radius;
+$("#planes-radius-val").textContent = planes.radius + " NM";
+var radiusDebounce;
+$("#planes-radius").oninput = function(e){
+  var nm = +e.target.value;
+  $("#planes-radius-val").textContent = nm + " NM";
+  clearTimeout(radiusDebounce);
+  radiusDebounce = setTimeout(function(){
+    planes.setRadius(nm);
+    C.Prefs.write({ planesRadius: nm });
+  }, 500);
+};
+
+/* Un déplacement de carte change le centre interrogé. */
+$("#planes-follow").checked = planes.follow;
+$("#planes-follow").onchange = function(e){
+  planes.setFollow(e.target.checked);
+  C.Prefs.write({ planesFollow: e.target.checked });
+  $("#planes-status").textContent = e.target.checked
+    ? "Les avions suivent la boucle : rien avant l'ouverture de la page."
+    : "Les avions restent en direct, quelle que soit l'image affichée.";
+};
+
+map.on("moveend", function(){ if(planes.enabled) planes.poll(); });
+
 var PLAY  = "M3 1.5 14 8 3 14.5z";
 var PAUSE = "M3 2h4v12H3zM9 2h4v12H9z";
 
@@ -235,6 +309,7 @@ function onBuilt(l){
 }
 
 function onShow(d, i, n){
+  planes.render(d, n ? loop.times[n - 1] : null);
   $("#stamp-time").textContent = C.clock(d, { weekday:"short" });
   $("#stamp-utc").textContent  = C.isoZ(d).slice(11, 16) + " UTC";
   $("#live").classList.toggle("on", i === n - 1);
@@ -636,6 +711,7 @@ document.addEventListener("visibilitychange", function(){
 
   onTracks(loop.tracks);
   saveTracks();
+  if(prefs.planesOn){ $("#planes-on").checked = true; $("#planes-on").dispatchEvent(new Event("change")); }
   if(loop.times.length > 1) setTimeout(function(){ loop.play(); }, 1200);
 })();
 

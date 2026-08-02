@@ -14,6 +14,10 @@
 
 *{ box-sizing:border-box }
 
+/*  L'attribut hidden ne pose qu'un display:none de faible poids : une règle
+    display:flex écrite ailleurs le supplante. On le rend impératif.      */
+[hidden]{ display:none !important }
+
 html,body{
   height:100%;
   margin:0;
@@ -100,3 +104,34 @@ body{
 @media (prefers-reduced-motion:reduce){
   *{ animation-duration:.001ms!important; transition-duration:.001ms!important }
 }
+
+/* ------------------------------------------------------------ trafic aérien */
+/*  Marqueurs posés sur de l'imagerie quelconque : le liseré sombre les
+    détache du fond, quelle que soit la couleur des échos en dessous.      */
+.plane{ background:none; border:0 }
+.plane svg{ width:20px; height:20px; display:block; transform-origin:50% 50% }
+
+.leaflet-tooltip.plane-tip{
+  background:rgba(21,24,27,.96);
+  border:1px solid var(--rule);
+  border-radius:2px;
+  color:var(--bone);
+  font-family:"IBM Plex Mono",monospace;
+  font-size:11px;
+  line-height:1.5;
+  padding:6px 8px;
+  box-shadow:none;
+  white-space:nowrap;
+}
+.leaflet-tooltip.plane-tip::before{ border-top-color:var(--rule) }
+.leaflet-tooltip.plane-tip b{ color:var(--bone); font-weight:600 }
+
+/*  Échelle des bandes d'altitude : la couleur ne porte jamais seule, chaque
+    palier est nommé.                                                      */
+.alt-legend{ margin-top:9px }
+.alt-legend .band{ display:flex; align-items:center; gap:8px; padding:2px 0 }
+.alt-legend .sw{
+  flex:0 0 auto; width:11px; height:11px; border-radius:2px;
+  border:1px solid var(--ink);
+}
+.alt-legend .lb{ font-family:"IBM Plex Mono",monospace; font-size:10px; color:var(--dimmer) }

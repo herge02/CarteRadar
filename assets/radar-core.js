@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "8";
+var VERSION = "9";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -78,6 +78,7 @@ function panes(map){
   map.createPane("static"); map.getPane("static").style.zIndex = 380;
   map.createPane("labels"); map.getPane("labels").style.zIndex = 460;
   map.getPane("labels").style.pointerEvents = "none";
+  map.createPane("planes"); map.getPane("planes").style.zIndex = 470;
 }
 
 /*  Premier élément portant ce nom local, préfixé ou non. getElementsByTagName
@@ -657,6 +658,325 @@ RadarLoop.prototype.refresh = async function(){
 RadarLoop.prototype.valueAt = function(latlng){
   return Promise.all(this.tracks.map(function(t){ return t.valueAt(latlng); }));
 };
+/* ============================================================== Avions ====
+   Le trafic aérien ne vient pas de GeoMet : c'est une source séparée, en
+   ADS-B communautaire, sans clé ni compte. Elle ne diffuse que l'instant
+   présent — aucun historique. La console, elle, remonte trois heures.
+
+   D'où le tampon : tant que la page est ouverte, chaque relevé est daté et
+   conservé ; quand on se déplace dans la boucle, chaque appareil est montré
+   à la position enregistrée la plus proche de cet instant. Avant l'ouverture
+   de la page, rien n'est connu, et rien n'est inventé.                     */
+
+var PLANE_SOURCES = {
+  "adsb.lol": {
+    label: "adsb.lol",
+    url: function(lat, lon, nm){
+      return "https://api.adsb.lol/v2/lat/" + lat.toFixed(4)
+           + "/lon/" + lon.toFixed(4) + "/dist/" + Math.round(Math.min(nm, 250));
+    }
+  },
+  "airplanes.live": {
+    label: "airplanes.live",
+    url: function(lat, lon, nm){
+      return "https://api.airplanes.live/v2/point/" + lat.toFixed(4)
+           + "/" + lon.toFixed(4) + "/" + Math.round(Math.min(nm, 250));
+    }
+  }
+};
+
+/*  Bandes d'altitude, en pieds. Rampe séquentielle bleue à teinte unique,
+    du sombre au clair : sur fond noir, plus c'est haut, plus c'est lisible,
+    et le trafic de croisière — le plus nombreux — ressort. Validée pour
+    l'écart de clarté entre paliers et pour le contraste du palier le plus
+    sombre sur la surface.                                                 */
+var ALT_BANDS = [
+  { max:  3000, color:"#184f95", label:"< 3 000 pi"      },
+  { max: 10000, color:"#256abf", label:"3 – 10 000 pi"   },
+  { max: 20000, color:"#3987e5", label:"10 – 20 000 pi"  },
+  { max: 30000, color:"#86b6ef", label:"20 – 30 000 pi"  },
+  { max: Infinity, color:"#b7d3f6", label:"> 30 000 pi"  }
+];
+
+function altBand(ft){
+  if(ft === null || ft === undefined || isNaN(ft)) return ALT_BANDS[0];
+  for(var i = 0; i < ALT_BANDS.length; i++){ if(ft < ALT_BANDS[i].max) return ALT_BANDS[i]; }
+  return ALT_BANDS[ALT_BANDS.length - 1];
+}
+
+function num(v){
+  if(v === null || v === undefined || v === "") return null;
+  var n = parseFloat(v);
+  return isNaN(n) ? null : n;
+}
+
+/*  Les sources ADS-B ne nomment pas leurs champs de la même façon : on
+    accepte les graphies courantes plutôt que d'en épouser une seule.     */
+function normalisePlane(a){
+  if(!a) return null;
+  var lat = num(a.lat !== undefined ? a.lat : a.latitude);
+  var lon = num(a.lon !== undefined ? a.lon : (a.lng !== undefined ? a.lng : a.longitude));
+  if(lat === null || lon === null) return null;
+
+  var alt = a.alt_baro;
+  if(alt === "ground") alt = 0;
+  if(alt === undefined || alt === null) alt = a.alt_geom;
+  if(alt === undefined || alt === null) alt = a.altitude;
+  if(alt === undefined || alt === null) alt = a.baro_altitude;
+
+  var trk = a.track;
+  if(trk === undefined || trk === null) trk = a.true_heading;
+  if(trk === undefined || trk === null) trk = a.heading;
+  if(trk === undefined || trk === null) trk = a.mag_heading;
+
+  var id = (a.hex || a.icao || a.icao24 || a.r || "").toString().trim().toLowerCase();
+  if(!id) return null;
+
+  return {
+    id  : id,
+    call: ((a.flight || a.callsign || "") + "").trim(),
+    reg : ((a.r || a.registration || "") + "").trim(),
+    type: ((a.t || a.type || "") + "").trim(),
+    lat : lat,
+    lon : lon,
+    alt : num(alt),
+    trk : num(trk),
+    spd : num(a.gs !== undefined ? a.gs : (a.speed !== undefined ? a.speed : a.velocity))
+  };
+}
+
+function extractPlanes(data){
+  var list = null;
+  if(Array.isArray(data)) list = data;
+  else if(data && Array.isArray(data.ac)) list = data.ac;
+  else if(data && Array.isArray(data.aircraft)) list = data.aircraft;
+  else if(data && Array.isArray(data.states)) list = data.states;   // OpenSky : tableaux bruts
+  if(!list) return null;
+
+  var out = [];
+  list.forEach(function(a){
+    /* OpenSky rend des tableaux positionnels, pas des objets. */
+    if(Array.isArray(a)){
+      a = { hex:a[0], callsign:a[1], lon:a[5], lat:a[6], baro_altitude:a[7],
+            velocity:a[9], true_heading:a[10] };
+      if(a.baro_altitude !== null && a.baro_altitude !== undefined) a.baro_altitude *= 3.28084;
+    }
+    var p = normalisePlane(a);
+    if(p) out.push(p);
+  });
+  return out;
+}
+
+function Aircraft(map, opts){
+  opts = opts || {};
+  this.map      = map;
+  this.source   = PLANE_SOURCES[opts.source] ? opts.source : "adsb.lol";
+  this.radius   = opts.radius || 120;      // milles nautiques
+  this.every    = opts.every  || 15000;    // intervalle de relevé
+  this.tolerance= opts.tolerance || 150000;// écart maximal toléré, 2 min 30
+  this.keep     = opts.keep || 3 * 3600000;// profondeur du tampon
+
+  this.enabled  = false;
+  /*  En direct par défaut : la flotte montrée est celle de maintenant, quelle
+      que soit l'image radar affichée. Le suivi de boucle apparie les
+      décalages, mais fait disparaître les avions dès qu'on rejoue le passé,
+      faute de relevés antérieurs à l'ouverture de la page.               */
+  this.follow   = !!opts.follow;
+  this.lastFrame  = null;
+  this.lastNewest = null;
+  this.buffer   = {};     // identifiant → relevés datés
+  this.meta     = {};     // identifiant → indicatif, immatriculation, type
+  this.markers  = {};
+  this.layer    = L.layerGroup();
+  this.since    = null;
+  this.timer    = null;
+  this.lastError= null;
+
+  this.on = Object.assign({
+    count: function(){},
+    status: function(){},
+    error: function(){}
+  }, opts.on || {});
+}
+
+Aircraft.prototype.sourceLabel = function(){
+  return (PLANE_SOURCES[this.source] || {}).label || this.source;
+};
+
+Aircraft.prototype.enable = function(){
+  if(this.enabled) return;
+  this.enabled = true;
+  this.layer.addTo(this.map);
+  var self = this;
+  this.poll();
+  this.timer = setInterval(function(){
+    if(document.hidden) return;         // en arrière-plan, on ne sonde pas
+    self.poll();
+  }, this.every);
+};
+
+Aircraft.prototype.disable = function(){
+  this.enabled = false;
+  clearInterval(this.timer);
+  this.timer = null;
+  this.map.removeLayer(this.layer);
+  this.layer.clearLayers();
+  this.markers = {};
+  this.on.count(0);
+};
+
+Aircraft.prototype.poll = async function(){
+  if(!this.enabled) return false;
+
+  var c = this.map.getCenter();
+  var url = PLANE_SOURCES[this.source].url(c.lat, c.lng, this.radius);
+
+  var data;
+  try {
+    var res = await fetch(url, { headers: { "Accept": "application/json" } });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    data = await res.json();
+  } catch(e){
+    this.lastError = e;
+    /*  Une source tierce peut refuser la requête depuis un navigateur faute
+        d'en-têtes CORS. Le message doit le dire, car ce n'est pas une panne
+        de la console.                                                     */
+    this.on.error(e);
+    this.on.status("Trafic indisponible : " + e.message
+      + ". Si l'erreur persiste, la source refuse peut-être les requêtes depuis un navigateur.");
+    return false;
+  }
+
+  var planes = extractPlanes(data);
+  if(!planes){
+    this.on.status("Réponse de " + this.sourceLabel() + " non reconnue.");
+    return false;
+  }
+
+  this.record(planes, Date.now());
+  this.render();          // la boucle peut être en pause : on rafraîchit ici
+  return true;
+};
+
+Aircraft.prototype.record = function(planes, when){
+  if(!this.since) this.since = when;
+  var self = this;
+
+  planes.forEach(function(p){
+    var b = self.buffer[p.id] = self.buffer[p.id] || [];
+    b.push({ t:when, lat:p.lat, lon:p.lon, trk:p.trk, alt:p.alt, spd:p.spd });
+    self.meta[p.id] = { call:p.call, reg:p.reg, type:p.type };
+  });
+
+  this.prune(when);
+  this.on.status(planes.length + " appareils · relevés depuis "
+                 + clock(new Date(this.since)) + " · " + this.sourceLabel());
+};
+
+Aircraft.prototype.prune = function(now){
+  var floor = now - this.keep;
+  for(var id in this.buffer){
+    var b = this.buffer[id].filter(function(s){ return s.t >= floor; });
+    if(b.length) this.buffer[id] = b;
+    else { delete this.buffer[id]; delete this.meta[id]; }
+  }
+};
+
+/* Relevé le plus proche de l'instant demandé, si l'écart reste tolérable. */
+Aircraft.prototype.sampleAt = function(id, ms){
+  var b = this.buffer[id];
+  if(!b || !b.length) return null;
+
+  var best = null, delta = Infinity;
+  for(var i = 0; i < b.length; i++){
+    var d = Math.abs(b[i].t - ms);
+    if(d < delta){ delta = d; best = b[i]; }
+  }
+  return delta <= this.tolerance ? best : null;
+};
+
+Aircraft.prototype.icon = function(s){
+  var band = altBand(s.alt);
+  return L.divIcon({
+    className: "plane",
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+    html: '<svg viewBox="0 0 24 24" style="transform:rotate(' + (s.trk || 0) + 'deg)">'
+        + '<path d="M12 1.5 14.2 10 22.5 13.2v2.1L14.2 13.6v5.1l3 2.2v1.6L12 20.9 6.8 22.5v-1.6l3-2.2v-5.1L1.5 15.3v-2.1L9.8 10z"'
+        + ' fill="' + band.color + '" stroke="#0E1012" stroke-width="1.4" stroke-linejoin="round"/></svg>'
+  });
+};
+
+/*  Dessine la flotte, marqueurs recyclés par identifiant : on déplace, on ne
+    recrée pas.
+
+    L'appariement des temps mérite une explication. Les relevés ADS-B sont
+    datés de l'heure courante ; la dernière image radar, elle, a déjà
+    quelques minutes de retard. Comparer les deux directement écarterait tout
+    le trafic. On raisonne donc en décalage : à l'image située à T moins
+    trente minutes correspondent les avions d'il y a trente minutes. Sur la
+    dernière image, le décalage est nul et l'on montre le relevé le plus
+    frais.                                                                */
+Aircraft.prototype.render = function(frameTime, newestTime){
+  if(!this.enabled) return;
+
+  this.lastFrame  = frameTime  || this.lastFrame;
+  this.lastNewest = newestTime || this.lastNewest;
+
+  var lag = (this.follow && this.lastNewest && this.lastFrame)
+          ? Math.max(0, this.lastNewest.getTime() - this.lastFrame.getTime())
+          : 0;
+  var ms = Date.now() - lag;
+  var shown = {}, n = 0, self = this;
+
+  for(var id in this.buffer){
+    var s = this.sampleAt(id, ms);
+    if(!s) continue;
+    shown[id] = true;
+    n++;
+
+    var m = this.markers[id];
+    if(m){
+      m.setLatLng([s.lat, s.lon]);
+      m.setIcon(this.icon(s));
+    } else {
+      m = L.marker([s.lat, s.lon], { icon:this.icon(s), pane:"planes", keyboard:false });
+      m.bindTooltip(this.describe(id, s), { direction:"top", offset:[0,-8], className:"plane-tip" });
+      this.markers[id] = m;
+      this.layer.addLayer(m);
+    }
+    m.setTooltipContent(this.describe(id, s));
+  }
+
+  for(var k in this.markers){
+    if(shown[k]) continue;
+    this.layer.removeLayer(this.markers[k]);
+    delete this.markers[k];
+  }
+  this.on.count(n);
+};
+
+Aircraft.prototype.describe = function(id, s){
+  var m = this.meta[id] || {};
+  var bits = [];
+  if(m.call) bits.push(m.call);
+  if(m.reg && m.reg !== m.call) bits.push(m.reg);
+  if(m.type) bits.push(m.type);
+  if(!bits.length) bits.push(id.toUpperCase());
+
+  var line2 = [];
+  if(s.alt !== null && s.alt !== undefined) line2.push(Math.round(s.alt).toLocaleString("fr-CA") + " pi");
+  if(s.spd !== null && s.spd !== undefined) line2.push(Math.round(s.spd) + " kt");
+  if(s.trk !== null && s.trk !== undefined) line2.push(Math.round(s.trk) + "°");
+
+  return '<b>' + bits.join(" · ") + '</b>'
+       + (line2.length ? '<br>' + line2.join("  ·  ") : "");
+};
+
+Aircraft.prototype.setRadius = function(nm){ this.radius = nm; if(this.enabled) this.poll(); };
+
+Aircraft.prototype.setFollow = function(on){ this.follow = !!on; this.render(); };
+
 /* --------------------------------------------------------------- exports */
 global.RadarCore = {
   VERSION: VERSION,
@@ -683,7 +1003,11 @@ global.RadarCore = {
   durationMs: durationMs,
   timeAxisFrom: timeAxisFrom,
   describeDoc: describeDoc,
-  RadarLoop: RadarLoop
+  RadarLoop: RadarLoop,
+  Aircraft: Aircraft,
+  PLANE_SOURCES: PLANE_SOURCES,
+  ALT_BANDS: ALT_BANDS,
+  extractPlanes: extractPlanes
 };
 
 })(window);

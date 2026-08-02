@@ -97,6 +97,21 @@ profite donc aux deux versions.
 
 - **Couches libres** : un identifiant peut aussi être saisi à la main, par
   exemple `HRDPS.CONTINENTAL_PR`.
+- **Trafic aérien** : les avions se posent en surimpression, orientés selon
+  leur cap et colorés par bande d'altitude. La source est un flux ADS-B
+  communautaire — `adsb.lol`, sans clé ni compte — **étrangère à GeoMet**.
+
+  Deux modes. **En direct** par défaut : la flotte affichée est celle de
+  maintenant, quelle que soit l'image radar sous elle. **Suivre la boucle** :
+  les décalages sont appariés, l'image d'il y a trente minutes montrant les
+  avions d'il y a trente minutes. Ce second mode ne peut rien montrer avant
+  l'ouverture de la page — la source ne diffuse que l'instant présent, et
+  rien n'est inventé pour combler.
+
+  Les relevés sont pris toutes les 15 secondes, jamais en arrière-plan, et
+  conservés dans un tampon daté. Si la source refuse les requêtes venues d'un
+  navigateur, faute d'en-têtes CORS, le message le dit : c'est la source, pas
+  la console.
 - **Mémoire** : la pile de couches avec leurs opacités, la vitesse, le fond de
   carte et la dernière position sont conservés dans le navigateur. Une couche
   que le service ne sert plus est signalée au rechargement, pas subie.
@@ -127,7 +142,7 @@ sans le suffixe `.html`.
 Les pages et les fichiers de `assets/` sont servis en `no-cache` : le
 navigateur les garde, mais revalide avant chaque usage, et reçoit un 304 tant
 que rien n'a changé. Les liens vers `assets/` portent en plus une marque de
-version (`?v=8`).
+version (`?v=9`).
 
 Cette prudence a une raison. Un `stale-while-revalidate` généreux sur les
 assets a déjà servi un `radar-core.js` périmé avec un HTML à jour : les deux
@@ -153,9 +168,22 @@ Python ne fait pas d'URL propres, mais les pages fonctionnent.
 - `/?v=pc` ou `/?v=mobile` — impose la version et la mémorise.
 - Le lien en bas du tiroir, ou de la feuille de réglages, fait la bascule.
 
+## Couleur
+
+Les bandes d'altitude des avions suivent une rampe séquentielle à teinte
+unique, du sombre au clair : sur fond noir, plus l'appareil vole haut, plus il
+ressort — et le trafic de croisière, le plus nombreux, se lit d'un coup d'œil.
+La rampe a été validée pour la monotonie de clarté, l'écart entre paliers et le
+contraste du palier le plus sombre sur la surface. Chaque palier est nommé dans
+l'échelle : la couleur ne porte jamais seule.
+
+Les marqueurs portent un liseré sombre, parce qu'ils se posent sur de
+l'imagerie quelconque et non sur une surface unie.
+
 ## Données
 
 Imagerie radar © Environnement et Changement climatique Canada, service
-[GeoMet](https://eccc-msc.github.io/open-data/). Fonds de carte © OpenStreetMap
-et CARTO. Le site n'a pas de serveur : le navigateur interroge GeoMet
-directement.
+[GeoMet](https://eccc-msc.github.io/open-data/). Trafic aérien : flux ADS-B
+communautaire [adsb.lol](https://www.adsb.lol/), alimenté par des bénévoles.
+Fonds de carte © OpenStreetMap et CARTO. Le site n'a pas de serveur : le
+navigateur interroge chaque source directement.
