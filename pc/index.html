@@ -12,8 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=11">
-<link rel="stylesheet" href="/assets/pc.css?v=11">
+<link rel="stylesheet" href="/assets/theme.css?v=13">
+<link rel="stylesheet" href="/assets/pc.css?v=13">
 </head>
 <body>
 
@@ -60,8 +60,8 @@
       <button id="planes-forget" class="quick-add" type="button">Oublier l'historique</button>
     </div>
     <p class="hint" id="planes-status">Source ADS-B communautaire, étrangère à GeoMet.
-      Les positions ne sont relevées que pendant que la page est ouverte : remonter
-      la boucle avant l'ouverture ne montre rien, et rien n'est inventé.</p>
+      L'historique est enregistré en continu côté serveur : « suivre la boucle »
+      montre alors les avions à l'heure de l'image radar affichée.</p>
   </div>
 
   <div class="group">
@@ -158,7 +158,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=11"></script>
+<script src="/assets/radar-core.js?v=13"></script>
 <script>
 (function(){
 "use strict";
@@ -336,7 +336,13 @@ function updatePlaneSpan(){
   bar.style.width = "auto";
 }
 
-map.on("moveend", function(){ if(planes.enabled) planes.poll(); });
+var histDebounce;
+map.on("moveend", function(){
+  if(!planes.enabled) return;
+  planes.poll();
+  clearTimeout(histDebounce);
+  histDebounce = setTimeout(function(){ planes.syncHistory(); }, 1200);
+});
 
 var PLAY  = "M3 1.5 14 8 3 14.5z";
 var PAUSE = "M3 2h4v12H3zM9 2h4v12H9z";

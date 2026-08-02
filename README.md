@@ -19,6 +19,9 @@ La racine `/` détecte l'appareil et redirige. Le choix est mémorisé.
 ```
 index.html                 aiguillage /pc ou /mobile
 api/planes.js              relais serveur pour le trafic aérien (contournement CORS)
+supabase/schema.sql        table, sécurité, purge et tâches planifiées
+supabase/functions/        collecte du trafic, exécutée chaque minute
+supabase/README.md         mise en service, pas à pas
 pc/index.html              console bureau
 mobile/index.html          console mobile
 assets/radar-core.js       moteur commun : GeoMet, boucle d'images, fonds de carte
@@ -113,13 +116,18 @@ profite donc aux deux versions.
   sources sont proposées, `adsb.lol` et `airplanes.live` : si l'une flanche,
   l'autre est à un clic.
 
-  **L'historique est celui qu'on a soi-même relevé — il n'en existe pas
+  **L'historique est celui qu'on a soi-même enregistré — il n'en existe pas
   d'autre.** Aucune source gratuite ne rend les positions passées : l'archive
   d'adsb.lol paraît le lendemain, en fichiers quotidiens, ce qui ne couvre
-  jamais les trois dernières heures. Les relevés sont donc conservés dans
-  IndexedDB et rechargés d'une visite à l'autre, pour que la mémoire s'étende
-  au lieu de repartir de zéro. Un point par appareil et par 45 secondes
-  suffit : la boucle radar bat aux six minutes.
+  jamais les trois dernières heures.
+
+  Il est donc constitué à deux niveaux. Une tâche planifiée chez **Supabase**
+  relève le trafic chaque minute, sans interruption et sans qu'aucun
+  navigateur soit ouvert : c'est elle qui permet d'accompagner toute la boucle
+  radar. Voir `supabase/README.md` pour la mise en service. En complément, le
+  navigateur garde ses propres relevés dans IndexedDB — un point par appareil
+  et par 45 secondes, la boucle radar battant aux six minutes — ce qui laisse
+  la console utile même si le serveur est muet.
 
   En mode « suivre la boucle », un trait bleu sous la ligne du temps marque la
   portion de la boucle qui dispose de positions. Hors de cette plage, la carte

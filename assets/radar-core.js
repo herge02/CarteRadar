@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "11";
+var VERSION = "13";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -821,6 +821,72 @@ var PlaneStore = {
   }
 };
 
+/* ------------------------------------------- historique côté Supabase ----
+   Le tampon du navigateur ne connaît que ce qui s'est passé pendant que la
+   page était ouverte. Une tâche planifiée chez Supabase, elle, relève le
+   trafic chaque minute sans interruption : c'est cet historique-là qui peut
+   accompagner toute la boucle radar.
+
+   La clé ci-dessous est publiable — c'est son nom même. Elle ne protège
+   rien : la table n'accorde que la lecture, et l'écriture est réservée à la
+   clé de service, qui ne quitte jamais Supabase. La publier dans une page
+   est le mode d'emploi prévu, pas une négligence.                         */
+var SUPABASE = {
+  url: "https://wmybeiknqecgjjzpnrju.supabase.co",
+  key: "sb_publishable_0OhnIWtSJJfZJZnxKu9TWg_CKb2ObTt",
+  table: "plane_fix"
+};
+
+var HISTORY_PAGE = 1000;   // PostgREST plafonne les réponses : on pagine
+
+function historyEnabled(){
+  return !!(SUPABASE.url && SUPABASE.key);
+}
+
+/*  Relevés postérieurs à `sinceMs`, restreints à l'emprise donnée. On pagine
+    par tranches, et on s'arrête à `cap` pour ne pas noyer un téléphone.   */
+async function fetchPlaneHistory(sinceMs, bounds, cap){
+  if(!historyEnabled()) return null;
+  cap = cap || 40000;
+
+  var q = "?select=icao24,ts,callsign,reg,actype,lat,lon,alt,trk,spd"
+        + "&ts=gte." + encodeURIComponent(new Date(sinceMs).toISOString())
+        + "&order=ts.asc";
+
+  if(bounds){
+    q += "&lat=gte." + bounds.getSouth().toFixed(3)
+      +  "&lat=lte." + bounds.getNorth().toFixed(3)
+      +  "&lon=gte." + bounds.getWest().toFixed(3)
+      +  "&lon=lte." + bounds.getEast().toFixed(3);
+  }
+
+  var url  = SUPABASE.url + "/rest/v1/" + SUPABASE.table + q;
+  var rows = [], from = 0;
+
+  while(rows.length < cap){
+    var res = await fetch(url, {
+      headers: {
+        apikey: SUPABASE.key,
+        Authorization: "Bearer " + SUPABASE.key,
+        Accept: "application/json",
+        Range: from + "-" + (from + HISTORY_PAGE - 1)
+      }
+    });
+    if(!res.ok){
+      var why = "";
+      try { why = (await res.json()).message || ""; } catch(_){}
+      throw new Error(why || ("historique : HTTP " + res.status));
+    }
+
+    var page = await res.json();
+    if(!page.length) break;
+    rows = rows.concat(page);
+    if(page.length < HISTORY_PAGE) break;
+    from += HISTORY_PAGE;
+  }
+  return rows;
+}
+
 function Aircraft(map, opts){
   opts = opts || {};
   this.map      = map;
@@ -834,6 +900,7 @@ function Aircraft(map, opts){
       largement et divise d'autant la mémoire occupée.                    */
   this.minGap   = opts.minGap || 45000;
   this.saveEvery= opts.saveEvery || 60000;
+  this.cap      = opts.cap || 40000;      // garde-fou sur le volume rapatrié
   this.saveTimer= null;
 
   this.enabled  = false;
@@ -848,8 +915,9 @@ function Aircraft(map, opts){
   this.meta     = {};     // identifiant → indicatif, immatriculation, type
   this.markers  = {};
   this.layer    = L.layerGroup();
-  this.since    = null;
-  this.timer    = null;
+  this.since      = null;
+  this.histBounds = null;
+  this.timer      = null;
   this.lastError= null;
 
   this.on = Object.assign({
@@ -890,6 +958,7 @@ Aircraft.prototype.disable = function(){
   this.map.removeLayer(this.layer);
   this.layer.clearLayers();
   this.markers = {};
+  this.histBounds = null;
   this.on.count(0);
 };
 
@@ -1072,15 +1141,82 @@ Aircraft.prototype.coverage = function(){
 
 Aircraft.prototype.restore = async function(){
   var saved = await PlaneStore.load();
-  if(!saved || !saved.buffer) return false;
+  if(saved && saved.buffer){
+    this.buffer = saved.buffer;
+    this.meta   = saved.meta || {};
+  }
 
-  this.buffer = saved.buffer;
-  this.meta   = saved.meta || {};
+  /*  L'historique du serveur vient par-dessus : il remonte plus loin que le
+      tampon local, qui ne couvre que les visites précédentes.           */
+  await this.syncHistory(true);
+
   this.prune(Date.now());
-
   var c = this.coverage();
   this.since = c ? c.from.getTime() : null;
   return !!c;
+};
+
+/*  Verse des lignes venues de la base dans le tampon, en respectant le même
+    amincissement que les relevés locaux, et sans dupliquer un instant déjà
+    connu.                                                                */
+/*  Rapatrie l'historique du serveur pour l'emprise courante. On mémorise
+    l'emprise servie : tant que la carte y reste, rien à redemander. Sortir
+    du cadre, en revanche, doit ramener les vols de la nouvelle zone.     */
+Aircraft.prototype.syncHistory = async function(force){
+  if(!historyEnabled()) return false;
+
+  var bounds = this.map.getBounds();
+  if(!force && this.histBounds && this.histBounds.contains(bounds)) return false;
+
+  try {
+    /*  On demande un peu plus large que l'écran : un léger déplacement ne
+        redéclenche alors pas tout le rapatriement.                       */
+    var marge = bounds.pad(0.35);
+    var rows  = await fetchPlaneHistory(Date.now() - this.keep, marge, this.cap);
+    if(rows){
+      this.absorb(rows);
+      this.histBounds = marge;
+      this.prune(Date.now());
+      this.render();
+      var c = this.coverage();
+      if(c) this.since = c.from.getTime();
+      this.on.status(rows.length + " positions d'archive · " + this.sourceLabel());
+    }
+    return true;
+  } catch(e){
+    this.lastError = e;
+    this.on.status("Historique indisponible — " + e.message + ". Le direct reste actif.");
+    return false;
+  }
+};
+
+Aircraft.prototype.absorb = function(rows){
+  var self = this, added = 0;
+
+  rows.forEach(function(r){
+    var when = Date.parse(r.ts);
+    if(isNaN(when)) return;
+
+    var id = (r.icao24 || "").toLowerCase();
+    if(!id) return;
+
+    var b = self.buffer[id] = self.buffer[id] || [];
+    var doublon = b.some(function(s){ return Math.abs(s.t - when) < 1000; });
+    if(doublon) return;
+
+    b.push({ t:when, lat:r.lat, lon:r.lon, trk:r.trk, alt:r.alt, spd:r.spd });
+    added++;
+
+    if(!self.meta[id] || !self.meta[id].call){
+      self.meta[id] = { call:r.callsign || "", reg:r.reg || "", type:r.actype || "" };
+    }
+  });
+
+  /* Le versement arrive dans le désordre : chaque piste est remise en ordre. */
+  for(var id in this.buffer){
+    this.buffer[id].sort(function(a, b){ return a.t - b.t; });
+  }
+  return added;
 };
 
 Aircraft.prototype.persist = function(){
@@ -1128,6 +1264,9 @@ global.RadarCore = {
   Aircraft: Aircraft,
   PLANE_SOURCES: PLANE_SOURCES,
   PlaneStore: PlaneStore,
+  SUPABASE: SUPABASE,
+  fetchPlaneHistory: fetchPlaneHistory,
+  historyEnabled: historyEnabled,
   ALT_BANDS: ALT_BANDS,
   extractPlanes: extractPlanes
 };
