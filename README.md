@@ -109,9 +109,22 @@ profite donc aux deux versions.
   l'ouverture de la page — la source ne diffuse que l'instant présent, et
   rien n'est inventé pour combler.
 
-  Les relevés sont pris toutes les 15 secondes, jamais en arrière-plan, et
-  conservés dans un tampon daté. Deux sources sont proposées, `adsb.lol` et
-  `airplanes.live` : si l'une flanche, l'autre est à un clic.
+  Les relevés sont pris toutes les 15 secondes, jamais en arrière-plan. Deux
+  sources sont proposées, `adsb.lol` et `airplanes.live` : si l'une flanche,
+  l'autre est à un clic.
+
+  **L'historique est celui qu'on a soi-même relevé — il n'en existe pas
+  d'autre.** Aucune source gratuite ne rend les positions passées : l'archive
+  d'adsb.lol paraît le lendemain, en fichiers quotidiens, ce qui ne couvre
+  jamais les trois dernières heures. Les relevés sont donc conservés dans
+  IndexedDB et rechargés d'une visite à l'autre, pour que la mémoire s'étende
+  au lieu de repartir de zéro. Un point par appareil et par 45 secondes
+  suffit : la boucle radar bat aux six minutes.
+
+  En mode « suivre la boucle », un trait bleu sous la ligne du temps marque la
+  portion de la boucle qui dispose de positions. Hors de cette plage, la carte
+  reste vide plutôt que de montrer des avions au mauvais moment. Un bouton
+  efface la mémoire.
 
   **Ces flux passent par `api/planes.js`, pas en direct.** Ils ne renvoient
   aucun en-tête `Access-Control-Allow-Origin`, et un navigateur refuse donc de

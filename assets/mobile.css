@@ -170,6 +170,13 @@ html,body{ overscroll-behavior:none }
 #ticks{ position:absolute; left:11px; right:11px; top:9px; height:8px; pointer-events:none }
 #ticks .t{ position:absolute; bottom:0; width:1px; height:5px; background:var(--dimmer); transform:translateX(-.5px) }
 #ticks .t.hour{ height:9px; background:var(--dim) }
+/*  Portion de la boucle couverte par la mémoire du trafic aérien. */
+#planes-span{
+  position:absolute; top:26px; height:2px;
+  background:#3987e5; opacity:.75;
+  border-radius:1px; pointer-events:none; display:none;
+}
+
 #loadbar{
   position:absolute; left:11px; top:23px; height:1px;
   background:var(--dim); width:0;

@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "10";
+var VERSION = "11";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -760,6 +760,67 @@ function extractPlanes(data){
   return out;
 }
 
+
+/* ------------------------------------------------- mémoire du trafic ----
+   Aucune source gratuite ne rend les positions passées : l'archive
+   d'adsb.lol paraît le lendemain. Le seul historique disponible est donc
+   celui qu'on a soi-même relevé. On le conserve d'une visite à l'autre,
+   pour qu'il s'étende au lieu de repartir de zéro à chaque ouverture.
+
+   IndexedDB plutôt que localStorage : quelques milliers de relevés
+   dépasseraient vite les cinq mégaoctets de ce dernier.                  */
+var PlaneStore = {
+  name: "carteradar", store: "planes", key: "buffer", db: null,
+
+  open: function(){
+    var self = this;
+    if(this.db) return Promise.resolve(this.db);
+    return new Promise(function(resolve, reject){
+      if(!global.indexedDB) return reject(new Error("IndexedDB indisponible"));
+      var req = global.indexedDB.open(self.name, 1);
+      req.onupgradeneeded = function(){
+        if(!req.result.objectStoreNames.contains(self.store)) req.result.createObjectStore(self.store);
+      };
+      req.onsuccess = function(){ self.db = req.result; resolve(self.db); };
+      req.onerror   = function(){ reject(req.error || new Error("ouverture refusée")); };
+    });
+  },
+
+  load: async function(){
+    try {
+      var db = await this.open(), self = this;
+      return await new Promise(function(resolve, reject){
+        var tx = db.transaction(self.store, "readonly").objectStore(self.store).get(self.key);
+        tx.onsuccess = function(){ resolve(tx.result || null); };
+        tx.onerror   = function(){ reject(tx.error); };
+      });
+    } catch(e){ return null; }
+  },
+
+  save: async function(payload){
+    try {
+      var db = await this.open(), self = this;
+      await new Promise(function(resolve, reject){
+        var tx = db.transaction(self.store, "readwrite").objectStore(self.store).put(payload, self.key);
+        tx.onsuccess = function(){ resolve(); };
+        tx.onerror   = function(){ reject(tx.error); };
+      });
+      return true;
+    } catch(e){ return false; }
+  },
+
+  clear: async function(){
+    try {
+      var db = await this.open(), self = this;
+      await new Promise(function(resolve){
+        var tx = db.transaction(self.store, "readwrite").objectStore(self.store).delete(self.key);
+        tx.onsuccess = tx.onerror = function(){ resolve(); };
+      });
+      return true;
+    } catch(e){ return false; }
+  }
+};
+
 function Aircraft(map, opts){
   opts = opts || {};
   this.map      = map;
@@ -768,6 +829,12 @@ function Aircraft(map, opts){
   this.every    = opts.every  || 15000;    // intervalle de relevé
   this.tolerance= opts.tolerance || 150000;// écart maximal toléré, 2 min 30
   this.keep     = opts.keep || 3 * 3600000;// profondeur du tampon
+  /*  On relève aux 15 s, mais on ne conserve qu'un point par appareil et par
+      45 s : la boucle radar bat aux six minutes, cette finesse suffit
+      largement et divise d'autant la mémoire occupée.                    */
+  this.minGap   = opts.minGap || 45000;
+  this.saveEvery= opts.saveEvery || 60000;
+  this.saveTimer= null;
 
   this.enabled  = false;
   /*  En direct par défaut : la flotte montrée est celle de maintenant, quelle
@@ -796,22 +863,30 @@ Aircraft.prototype.sourceLabel = function(){
   return (PLANE_SOURCES[this.source] || {}).label || this.source;
 };
 
-Aircraft.prototype.enable = function(){
+Aircraft.prototype.enable = async function(){
   if(this.enabled) return;
   this.enabled = true;
   this.layer.addTo(this.map);
+
   var self = this;
+  await this.restore();                 // l'historique déjà relevé revient
+  this.render();
   this.poll();
+
   this.timer = setInterval(function(){
     if(document.hidden) return;         // en arrière-plan, on ne sonde pas
     self.poll();
   }, this.every);
+
+  this.saveTimer = setInterval(function(){ self.persist(); }, this.saveEvery);
 };
 
 Aircraft.prototype.disable = function(){
   this.enabled = false;
   clearInterval(this.timer);
-  this.timer = null;
+  clearInterval(this.saveTimer);
+  this.timer = this.saveTimer = null;
+  this.persist();                       // on ne perd pas ce qui a été relevé
   this.map.removeLayer(this.layer);
   this.layer.clearLayers();
   this.markers = {};
@@ -865,7 +940,13 @@ Aircraft.prototype.record = function(planes, when){
 
   planes.forEach(function(p){
     var b = self.buffer[p.id] = self.buffer[p.id] || [];
-    b.push({ t:when, lat:p.lat, lon:p.lon, trk:p.trk, alt:p.alt, spd:p.spd });
+    var last = b[b.length - 1];
+    if(last && when - last.t < self.minGap){
+      /* Trop rapproché du précédent : on remplace plutôt que d'empiler. */
+      b[b.length - 1] = { t:when, lat:p.lat, lon:p.lon, trk:p.trk, alt:p.alt, spd:p.spd };
+    } else {
+      b.push({ t:when, lat:p.lat, lon:p.lon, trk:p.trk, alt:p.alt, spd:p.spd });
+    }
     self.meta[p.id] = { call:p.call, reg:p.reg, type:p.type };
   });
 
@@ -974,6 +1055,45 @@ Aircraft.prototype.describe = function(id, s){
        + (line2.length ? '<br>' + line2.join("  ·  ") : "");
 };
 
+/*  Étendue réellement couverte par la mémoire : c'est elle qui dit quelle
+    portion de la boucle radar peut être accompagnée d'avions.           */
+Aircraft.prototype.coverage = function(){
+  var from = Infinity, to = -Infinity, samples = 0, n = 0;
+  for(var id in this.buffer){
+    var b = this.buffer[id];
+    if(!b.length) continue;
+    n++; samples += b.length;
+    if(b[0].t < from) from = b[0].t;
+    if(b[b.length - 1].t > to) to = b[b.length - 1].t;
+  }
+  if(!n) return null;
+  return { from:new Date(from), to:new Date(to), aircraft:n, samples:samples };
+};
+
+Aircraft.prototype.restore = async function(){
+  var saved = await PlaneStore.load();
+  if(!saved || !saved.buffer) return false;
+
+  this.buffer = saved.buffer;
+  this.meta   = saved.meta || {};
+  this.prune(Date.now());
+
+  var c = this.coverage();
+  this.since = c ? c.from.getTime() : null;
+  return !!c;
+};
+
+Aircraft.prototype.persist = function(){
+  return PlaneStore.save({ buffer:this.buffer, meta:this.meta, saved:Date.now() });
+};
+
+Aircraft.prototype.forget = async function(){
+  this.buffer = {}; this.meta = {}; this.since = null;
+  await PlaneStore.clear();
+  this.render();
+  this.on.status("Mémoire du trafic effacée.");
+};
+
 Aircraft.prototype.setRadius = function(nm){ this.radius = nm; if(this.enabled) this.poll(); };
 
 Aircraft.prototype.setFollow = function(on){ this.follow = !!on; this.render(); };
@@ -1007,6 +1127,7 @@ global.RadarCore = {
   RadarLoop: RadarLoop,
   Aircraft: Aircraft,
   PLANE_SOURCES: PLANE_SOURCES,
+  PlaneStore: PlaneStore,
   ALT_BANDS: ALT_BANDS,
   extractPlanes: extractPlanes
 };

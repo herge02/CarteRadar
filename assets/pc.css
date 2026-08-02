@@ -103,6 +103,16 @@
 }
 #progress{ position:absolute; left:0; top:28px; height:1px; background:var(--dim); width:0 }
 
+/*  Portion de la boucle pour laquelle on possède des positions d'avions.
+    Hors de cette plage, il n'y a rien à montrer — et rien n'est inventé.  */
+#planes-span{
+  position:absolute; top:31px; height:2px;
+  background:#3987e5; opacity:.75;
+  border-radius:1px;
+  pointer-events:none;
+  display:none;
+}
+
 /* vitesse */
 #speed{ display:flex; flex-direction:column; gap:6px; justify-self:end }
 #speed .row{ display:flex; align-items:center; gap:10px }

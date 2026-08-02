@@ -15,8 +15,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=10">
-<link rel="stylesheet" href="/assets/mobile.css?v=10">
+<link rel="stylesheet" href="/assets/theme.css?v=11">
+<link rel="stylesheet" href="/assets/mobile.css?v=11">
 </head>
 <body>
 
@@ -60,6 +60,7 @@
       <div id="scrub-wrap">
         <div id="ticks"></div>
         <div id="loadbar"></div>
+        <div id="planes-span"></div>
         <input type="range" id="scrub" min="0" max="0" value="0" step="1" aria-label="Position dans la boucle">
       </div>
 
@@ -125,6 +126,9 @@
       </select>
     </div>
     <div class="alt-legend" id="alt-legend" hidden></div>
+    <div id="planes-mem-row" hidden style="margin-top:9px">
+      <button id="planes-forget" class="quick-add" type="button">Oublier l'historique</button>
+    </div>
     <p class="hint" id="planes-status">Source ADS-B communautaire, étrangère à GeoMet.
       Les positions ne sont relevées que pendant que la page est ouverte. Un relevé
       toutes les 15 s consomme des données.</p>
@@ -171,7 +175,7 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=10"></script>
+<script src="/assets/radar-core.js?v=11"></script>
 <script>
 (function(){
 "use strict";
@@ -262,6 +266,8 @@ $("#planes-on").onchange = function(e){
   $("#planes-radius-row").hidden = !e.target.checked;
   $("#planes-follow-row").hidden = !e.target.checked;
   $("#planes-source-row").hidden = !e.target.checked;
+  $("#planes-mem-row").hidden = !e.target.checked;
+  updatePlaneSpan();
   $("#alt-legend").hidden = !e.target.checked;
   C.Prefs.write({ planesOn: e.target.checked });
   if(e.target.checked){
@@ -291,6 +297,7 @@ $("#planes-follow").checked = planes.follow;
 $("#planes-follow").onchange = function(e){
   planes.setFollow(e.target.checked);
   C.Prefs.write({ planesFollow: e.target.checked });
+  updatePlaneSpan();
   $("#planes-status").textContent = e.target.checked
     ? "Les avions suivent la boucle : rien avant l'ouverture de la page."
     : "Les avions restent en direct, quelle que soit l'image affichée.";
@@ -305,6 +312,35 @@ $("#planes-source").onchange = function(e){
     planes.poll();
   }
 };
+
+$("#planes-forget").onclick = function(){ planes.forget(); updatePlaneSpan(); };
+
+/*  Marque sur la ligne du temps la portion de la boucle qui dispose de
+    positions d'avions. Une image plus ancienne que la mémoire ne peut être
+    accompagnée de rien : mieux vaut le montrer que le laisser deviner.   */
+function updatePlaneSpan(){
+  var bar = $("#planes-span");
+  var c   = planes.enabled && planes.follow ? planes.coverage() : null;
+  var n   = loop.times.length;
+
+  if(!c || n < 2){ bar.style.display = "none"; return; }
+
+  var oldest = loop.times[0].getTime();
+  var newest = loop.times[n - 1].getTime();
+  var total  = newest - oldest;
+  if(total <= 0){ bar.style.display = "none"; return; }
+
+  /*  Une image datée f correspond à l'heure murale « maintenant moins le
+      retard de f sur la dernière image ». La mémoire remonte jusqu'à
+      c.from : le seuil est l'image dont l'équivalent murale y tombe.    */
+  var seuil = newest - (Date.now() - c.from.getTime());
+  var debut = Math.min(1, Math.max(0, (seuil - oldest) / total));
+
+  bar.style.display = "block";
+  bar.style.left  = (debut * 100) + "%";
+  bar.style.right = "0";
+  bar.style.width = "auto";
+}
 
 map.on("moveend", function(){ if(planes.enabled) planes.poll(); });
 
