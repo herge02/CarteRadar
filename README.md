@@ -19,8 +19,7 @@ La racine `/` détecte l'appareil et redirige. Le choix est mémorisé.
 ```
 index.html                 aiguillage /pc ou /mobile
 api/planes.js              relais serveur pour le trafic aérien (contournement CORS)
-supabase/schema.sql        table, sécurité, purge et tâches planifiées
-supabase/functions/        collecte du trafic, exécutée chaque minute
+supabase/schema.sql        collecte, table, sécurité, purge et tâches — un seul collage
 supabase/README.md         mise en service, pas à pas
 pc/index.html              console bureau
 mobile/index.html          console mobile
@@ -124,7 +123,9 @@ profite donc aux deux versions.
   Il est donc constitué à deux niveaux. Une tâche planifiée chez **Supabase**
   relève le trafic chaque minute, sans interruption et sans qu'aucun
   navigateur soit ouvert : c'est elle qui permet d'accompagner toute la boucle
-  radar. Voir `supabase/README.md` pour la mise en service. En complément, le
+  radar. Elle tient entièrement dans la base, par `pg_cron` et `pg_net` — un
+  seul collage de `supabase/schema.sql` suffit, sans ligne de commande ni
+  secret à manipuler. En complément, le
   navigateur garde ses propres relevés dans IndexedDB — un point par appareil
   et par 45 secondes, la boucle radar battant aux six minutes — ce qui laisse
   la console utile même si le serveur est muet.
