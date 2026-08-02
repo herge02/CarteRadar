@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "14";
+var VERSION = "16";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -495,6 +495,12 @@ function RadarLoop(map, opts){
   this.map    = map;
   this.wanted = opts.wanted || MAX_FRAMES;
   this.fps    = opts.fps    || 5;
+
+  /*  Pas de la ligne du temps. Les images radar arrivent aux six minutes,
+      mais rien n'oblige la ligne du temps à ce rythme : plus elle est fine,
+      plus les avions se déplacent doucement entre deux images, qui restent
+      simplement affichées jusqu'à la suivante.                           */
+  this.resolution = opts.resolution || 30000;
   this.dwell  = opts.dwell  || 1300;   // arrêt sur la dernière image
 
   this.tracks = [];
@@ -568,10 +574,10 @@ RadarLoop.prototype.setTrackOpacity = function(id, v){
   if(t) t.setOpacity(v);
 };
 
-/*  Ligne du temps commune : l'union des instants de toutes les pistes. Une
-    piste qui n'a pas d'image à un instant donné garde la sienne, la plus
-    proche — pas de trou, pas de clignotement.                            */
-RadarLoop.prototype.retime = function(){
+/*  Instants où une image existe réellement, toutes pistes confondues. Ce
+    sont eux que la règle gradue : ils marquent les moments où l'imagerie
+    change, ce qu'une ligne du temps régulière ne dirait pas.            */
+RadarLoop.prototype.frameTimes = function(){
   var seen = {}, all = [];
   this.tracks.forEach(function(t){
     t.times.forEach(function(d){
@@ -580,10 +586,42 @@ RadarLoop.prototype.retime = function(){
     });
   });
   all.sort(function(a, b){ return a - b; });
+  return all;
+};
 
-  this.times = all.slice(-Math.max(1, this.wanted));
-  if(this.idx >= this.times.length) this.idx = Math.max(0, this.times.length - 1);
+/*  Ligne du temps : un pas régulier, indépendant du rythme des images. À
+    chaque pas, une piste montre l'image la plus proche qu'elle possède —
+    elle la garde donc affichée entre deux — tandis que les avions, eux,
+    sont interpolés. C'est ce qui rend leur déplacement continu alors que
+    l'imagerie, elle, avance par sauts.                                  */
+RadarLoop.prototype.retime = function(){
+  var f = this.frameTimes();
+  if(!f.length){ this.times = []; this.idx = 0; this.on.built(this); return; }
+
+  var debut = f[0].getTime(), fin = f[f.length - 1].getTime();
+  var pas   = Math.max(1000, this.resolution);
+  var n     = Math.floor((fin - debut) / pas);
+
+  /*  Garde-fou : une ligne du temps de plusieurs milliers de pas coûterait
+      plus cher qu'elle ne rapporte.                                     */
+  var MAX = 1500;
+  if(n > MAX){ pas = Math.ceil((fin - debut) / MAX); n = Math.floor((fin - debut) / pas); }
+
+  var out = [];
+  for(var i = n; i >= 0; i--) out.push(new Date(fin - i * pas));
+
+  /*  On conserve la position relative dans la boucle plutôt que l'index,
+      qui ne veut plus rien dire quand le pas change.                    */
+  var part = this.times.length > 1 ? this.idx / (this.times.length - 1) : 1;
+  this.times = out;
+  this.idx = Math.round(part * (out.length - 1));
   this.on.built(this);
+};
+
+RadarLoop.prototype.setResolution = function(ms){
+  this.resolution = ms;
+  this.retime();
+  this.show(this.idx);
 };
 
 RadarLoop.prototype.show = function(i){
@@ -905,17 +943,13 @@ function Aircraft(map, opts){
 
   this.enabled  = false;
 
-  /*  Trois façons de situer la flotte dans le temps :
-        « direct » — toujours maintenant, quelle que soit l'image radar ;
-        « radar »  — appariée à l'image affichée, donc par bonds de six
-                     minutes, ce qui montre mal le déplacement ;
-        « propre » — horloge indépendante, avançant par petits pas, pour
-                     voir les trajectoires se dérouler.                   */
-  this.mode     = opts.mode || (opts.follow ? "radar" : "direct");
-  this.step     = opts.step || 5000;    // temps enregistré gagné par battement
-  this.tickMs   = opts.tickMs || 200;   // cinq battements par seconde
-  this.cursor   = null;                 // instant courant, mode « propre »
-  this.anim     = null;
+  /*  Deux façons de situer la flotte dans le temps :
+        « direct » — toujours maintenant, quelle que soit la position dans
+                     la boucle ;
+        « ligne »  — à l'instant de la ligne du temps, interpolée entre les
+                     relevés. La ligne étant plus fine que le rythme des
+                     images, le déplacement se voit.                      */
+  this.mode     = opts.mode === "direct" ? "direct" : "ligne";
 
   /*  Au-delà de cet écart entre deux relevés, l'appareil a probablement
       quitté la zone : interpoler tracerait une droite à travers le vide.  */
@@ -962,7 +996,6 @@ Aircraft.prototype.enable = async function(){
 
 Aircraft.prototype.disable = function(){
   this.enabled = false;
-  this.stopAnim();
   clearInterval(this.timer);
   clearInterval(this.saveTimer);
   this.timer = this.saveTimer = null;
@@ -1309,49 +1342,16 @@ Aircraft.prototype.forget = async function(){
 
 /*  Instant auquel la flotte est montrée, selon le mode retenu. */
 Aircraft.prototype.clockAt = function(){
-  if(this.mode === "propre" && this.cursor) return this.cursor;
-
-  var lag = (this.mode === "radar" && this.lastNewest && this.lastFrame)
+  var lag = (this.mode === "ligne" && this.lastNewest && this.lastFrame)
           ? Math.max(0, this.lastNewest.getTime() - this.lastFrame.getTime())
           : 0;
   return Date.now() - lag;
 };
 
-/*  Horloge indépendante : elle parcourt l'étendue enregistrée par pas de
-    `step` millisecondes de temps réel, et reboucle au début.            */
-Aircraft.prototype.startAnim = function(){
-  this.stopAnim();
-  var self = this, c = this.coverage();
-  if(!c) return false;
-
-  if(!this.cursor || this.cursor < c.from.getTime() || this.cursor > c.to.getTime()){
-    this.cursor = c.from.getTime();
-  }
-
-  this.anim = setInterval(function(){
-    if(document.hidden) return;
-    var e = self.coverage();
-    if(!e) return;
-    self.cursor += self.step;
-    if(self.cursor > e.to.getTime()) self.cursor = e.from.getTime();
-    self.render();
-  }, this.tickMs);
-  return true;
-};
-
-Aircraft.prototype.stopAnim = function(){
-  clearInterval(this.anim);
-  this.anim = null;
-};
-
 Aircraft.prototype.setMode = function(m){
-  this.mode = m;
-  if(m === "propre") this.startAnim();
-  else { this.stopAnim(); this.cursor = null; }
+  this.mode = (m === "direct") ? "direct" : "ligne";
   this.render();
 };
-
-Aircraft.prototype.setStep = function(ms){ this.step = ms; };
 
 Aircraft.prototype.setRadius = function(nm){ this.radius = nm; if(this.enabled) this.poll(); };
 

@@ -15,8 +15,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=14">
-<link rel="stylesheet" href="/assets/mobile.css?v=14">
+<link rel="stylesheet" href="/assets/theme.css?v=16">
+<link rel="stylesheet" href="/assets/mobile.css?v=16">
 </head>
 <body>
 
@@ -93,6 +93,16 @@
       <input type="range" id="fps" min="1" max="14" step="1" value="5">
       <span class="val" id="fps-val">5 i/s</span>
     </div>
+    <div class="row" style="margin-bottom:6px">
+      <span class="eyebrow" style="flex:0 0 auto">Finesse</span>
+      <select id="resolution" aria-label="Pas de la ligne du temps">
+        <option value="15000">15 s</option>
+        <option value="30000" selected>30 s</option>
+        <option value="60000">1 min</option>
+        <option value="180000">3 min</option>
+        <option value="360000">6 min</option>
+      </select>
+    </div>
     <div class="slider">
       <span class="eyebrow">Images</span>
       <input type="range" id="frames" min="6" max="30" value="15">
@@ -118,13 +128,7 @@
     </div>
     <div id="planes-mode-row" hidden>
       <label class="opt"><input type="radio" name="planes-mode" value="direct" checked> En direct</label>
-      <label class="opt"><input type="radio" name="planes-mode" value="radar"> Lié à l'image radar</label>
-      <label class="opt"><input type="radio" name="planes-mode" value="propre"> Animation propre</label>
-    </div>
-    <div class="slider" id="planes-step-row" hidden>
-      <span class="eyebrow">Pas</span>
-      <input type="range" id="planes-step" min="1" max="60" step="1" value="5">
-      <span class="val" id="planes-step-val">5 s</span>
+      <label class="opt"><input type="radio" name="planes-mode" value="ligne"> Suivre la ligne du temps</label>
     </div>
     <div id="planes-clock" class="hint mono" hidden></div>
     <div class="row" id="planes-source-row" hidden style="margin-top:8px">
@@ -184,7 +188,7 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=14"></script>
+<script src="/assets/radar-core.js?v=16"></script>
 <script>
 (function(){
 "use strict";
@@ -237,6 +241,7 @@ function toast(msg){
    qu'une pile de couches multiplie la facture. */
 var loop = new C.RadarLoop(map, {
   wanted : prefs.wantedMobile || 15,
+  resolution : prefs.resolution || 30000,
   fps    : prefs.fps || 5,
   on: {
     built    : onBuilt,
@@ -256,8 +261,7 @@ var planeCount = 0, dernierCadran = '';
 var planes = new C.Aircraft(map, {
   radius: prefs.planesRadius || 120,
   cap: 12000,          // téléphone : on borne le volume rapatrié
-  mode: prefs.planesMode || (prefs.planesFollow ? 'radar' : 'direct'),
-  step: (prefs.planesStep || 5) * 1000,
+  mode: prefs.planesMode === 'ligne' ? 'ligne' : 'direct',
   source: prefs.planesSource,
   on: {
     count : function(n, ms){
@@ -318,8 +322,7 @@ $("#planes-radius").oninput = function(e){
     donne son horloge : elle avance par petits pas d'un temps enregistré,
     indépendamment de la boucle radar, ce qui laisse voir les trajectoires
     se dérouler au lieu de sauter de six minutes en six minutes.         */
-var planeMode = prefs.planesMode || (prefs.planesFollow ? "radar" : "direct");
-var planeStep = prefs.planesStep || 5;
+var planeMode = prefs.planesMode === "ligne" ? "ligne" : "direct";
 
 function syncPlaneMode(){
   var r = document.querySelector('input[name=planes-mode][value="' + planeMode + '"]');
@@ -328,7 +331,6 @@ function syncPlaneMode(){
     x.closest(".opt").classList.toggle("checked", x.checked);
   });
   var actif = $("#planes-on").checked;
-  $("#planes-step-row").hidden  = !actif || planeMode !== "propre";
   $("#planes-clock").hidden     = !actif || planeMode === "direct";
   updatePlaneSpan();
 }
@@ -342,14 +344,6 @@ document.querySelectorAll('input[name=planes-mode]').forEach(function(r){
   };
 });
 
-$("#planes-step").value = planeStep;
-$("#planes-step-val").textContent = planeStep + " s";
-$("#planes-step").oninput = function(e){
-  planeStep = +e.target.value;
-  $("#planes-step-val").textContent = planeStep + " s";
-  planes.setStep(planeStep * 1000);
-  C.Prefs.write({ planesStep: planeStep });
-};
 
 $("#planes-source").value = planes.source;
 $("#planes-source").onchange = function(e){
@@ -368,10 +362,19 @@ $("#planes-forget").onclick = function(){ planes.forget(); updatePlaneSpan(); };
     accompagnée de rien : mieux vaut le montrer que le laisser deviner.   */
 function updatePlaneSpan(){
   var bar = $("#planes-span");
-  var c   = (planes.enabled && planes.mode === "radar") ? planes.coverage() : null;
+  var c   = (planes.enabled && planes.mode === "ligne") ? planes.coverage() : null;
   var n   = loop.times.length;
 
-  if(!c || n < 2){ bar.style.display = "none"; return; }
+  if(!c || n < 2){
+    bar.style.display = "none";
+    if(planes.enabled && planes.mode === "ligne" && !c){
+      $("#planes-status").textContent =
+        "Aucun historique : en mode « ligne du temps », les avions "
+        + "n'apparaîtront qu'à la dernière image. Le mode « en direct » les "
+        + "montre partout.";
+    }
+    return;
+  }
 
   var oldest = loop.times[0].getTime();
   var newest = loop.times[n - 1].getTime();
@@ -423,25 +426,31 @@ function onProgress(ratio){
 
 function onBuilt(l){
   $("#scrub").max = Math.max(0, l.times.length - 1);
-  drawTicks(l.times);
+  drawTicks(l.frameTimes(), l.times);
 }
 
 function onShow(d, i, n){
   planes.render(d, n ? loop.times[n - 1] : null);
   $("#stamp-time").textContent = C.clock(d, { weekday:"short" });
-  $("#stamp-utc").textContent  = C.isoZ(d).slice(11, 16) + " UTC";
+  /*  À 30 s de finesse, un affichage à la minute semble figé un pas sur
+      deux. Les secondes vont ici plutôt que dans le grand horodatage :
+      « dim. 18 h 33 min 36 s » déborderait d'un écran de téléphone.     */
+  $("#stamp-utc").textContent  = C.isoZ(d).slice(11, loop.resolution < 60000 ? 19 : 16) + " UTC";
   $("#live").classList.toggle("on", i === n - 1);
   if(!scrubbing) $("#scrub").value = i;
 }
 
-function drawTicks(times){
+/*  Graduations aux instants d'image, situées sur l'échelle de la ligne. */
+function drawTicks(frames, ligne){
   var host = $("#ticks");
   host.textContent = "";
-  var n = times.length;
-  times.forEach(function(d, i){
+  if(!ligne || ligne.length < 2 || !frames.length) return;
+
+  var debut = ligne[0].getTime(), span = ligne[ligne.length - 1].getTime() - debut || 1;
+  frames.forEach(function(d){
     var t = document.createElement("div");
     t.className = "t" + (d.getMinutes() === 0 ? " hour" : "");
-    t.style.left = (n > 1 ? i / (n - 1) * 100 : 0) + "%";
+    t.style.left = Math.max(0, Math.min(100, (d.getTime() - debut) / span * 100)) + "%";
     host.appendChild(t);
   });
 }
@@ -571,6 +580,12 @@ $("#frames").oninput = function(e){
     loop.setWanted(n);
     C.Prefs.write({ wantedMobile:n });
   }, 500);
+};
+
+$("#resolution").value = String(loop.resolution);
+$("#resolution").onchange = function(e){
+  loop.setResolution(+e.target.value);
+  C.Prefs.write({ resolution: +e.target.value });
 };
 
 document.querySelectorAll(".opt input").forEach(function(i){

@@ -78,6 +78,15 @@ profite donc aux deux versions.
   figuré sur la foi d'un annuaire tiers qui republie GeoMet, et le service
   les refuse avec `InvalidLayersParameter`.
 
+- **Ligne du temps** : son pas est indépendant du rythme des images. Trente
+  secondes par défaut, réglable de 15 s à 6 min. À chaque jalon, une couche
+  animée montre l'image la plus proche qu'elle possède — elle la garde donc
+  affichée entre deux — tandis que les avions, eux, sont interpolés. C'est ce
+  qui rend leur déplacement continu alors que l'imagerie avance par sauts.
+
+  Les graduations de la règle marquent les **instants où une image existe**,
+  pas les jalons : elles disent où l'imagerie change réellement.
+
 - **Boucle** : jusqu'à 30 images, soit les trois dernières heures. Arrêt d'une
   seconde et demie sur la dernière image avant de reboucler, comme les boucles
   d'ECCC.
@@ -104,24 +113,19 @@ profite donc aux deux versions.
   leur cap et colorés par bande d'altitude. La source est un flux ADS-B
   communautaire — `adsb.lol`, sans clé ni compte — **étrangère à GeoMet**.
 
-  Trois façons de les situer dans le temps :
+  Deux façons de les situer dans le temps. **En direct** par défaut : la
+  flotte de maintenant, quelle que soit la position dans la boucle — ce mode
+  fonctionne sans historique. **Suivre la ligne du temps** : les avions sont
+  montrés à l'instant du curseur, ce qui demande d'avoir enregistré cet
+  instant.
 
-  - **En direct** — la flotte de maintenant, quelle que soit l'image radar.
-  - **Lié à l'image radar** — les décalages sont appariés : l'image d'il y a
-    trente minutes montre les avions d'il y a trente minutes. La boucle
-    avançant par bonds de six minutes, les appareils sautent d'autant.
-  - **Animation propre** — les avions reçoivent leur propre horloge, qui
-    parcourt l'historique par pas réglables, cinq secondes par défaut,
-    indépendamment du radar. C'est le mode qui laisse voir les trajectoires
-    se dérouler.
-
-  Ce dernier mode repose sur une **interpolation** : la collecte ne relève
-  qu'une position par minute, un pas de cinq secondes n'aurait donc rien à
-  montrer. Les positions intermédiaires sont calculées entre les deux relevés
-  qui les encadrent — le cap sur l'écart replié, pour que le passage de 350°
-  à 10° emprunte le chemin court. Au-delà de trois minutes entre deux
-  relevés, l'appareil a probablement quitté la zone : rien n'est interpolé,
-  car ce serait tracer une droite à travers le vide.
+  Ce second mode repose sur une **interpolation** : la collecte ne relève
+  qu'une position par minute, une ligne du temps au pas de trente secondes
+  n'aurait donc rien à montrer. Les positions intermédiaires sont calculées
+  entre les deux relevés qui les encadrent — le cap sur l'écart replié, pour
+  que le passage de 350° à 10° emprunte le chemin court. Au-delà de trois
+  minutes entre deux relevés, l'appareil a probablement quitté la zone : rien
+  n'est interpolé, car ce serait tracer une droite à travers le vide.
 
   Les relevés sont pris toutes les 15 secondes, jamais en arrière-plan. Deux
   sources sont proposées, `adsb.lol` et `airplanes.live` : si l'une flanche,
