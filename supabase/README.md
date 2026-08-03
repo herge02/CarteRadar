@@ -13,6 +13,28 @@ manipuler. La collecte s'exécute dans la base elle-même, par `pg_cron` et
 Tableau de bord → **SQL Editor** → **New query** → coller tout le contenu de
 `schema.sql` → **Run**.
 
+### Si l'éditeur refuse un collage aussi long
+
+`schema.sql` fait 239 lignes. Le dossier `morceaux/` contient exactement le
+même contenu découpé en **quatre fichiers de moins de cent lignes**, à coller
+l'un après l'autre, dans l'ordre :
+
+| Fichier | Lignes | Contenu |
+|---|--:|---|
+| `morceaux/1-tables.sql` | 64 | extensions, tables, index, sécurité |
+| `morceaux/2-demande.sql` | 38 | `request_planes()` — dépose la requête |
+| `morceaux/3-digestion.sql` | 88 | `ingest_planes()` — verse les réponses |
+| `morceaux/4-purge-et-horaire.sql` | 40 | `purge_plane_fix()` et les trois tâches |
+
+L'ordre compte : le dernier morceau programme des tâches qui appellent les
+fonctions des précédents. Chaque morceau se recolle sans dommage — les tables
+sont créées `if not exists`, les fonctions `create or replace`, et les tâches
+sont déprogrammées avant d'être reprogrammées.
+
+Les deux voies donnent une base identique — tables, colonnes, politiques,
+fonctions et tâches — ce qui a été vérifié en installant les deux côte à côte
+sur un PostgreSQL 16 et en les comparant.
+
 C'est fait. Trois tâches sont désormais programmées :
 
 | Tâche | Cadence | Rôle |
