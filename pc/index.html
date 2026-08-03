@@ -12,8 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=19">
-<link rel="stylesheet" href="/assets/pc.css?v=19">
+<link rel="stylesheet" href="/assets/theme.css?v=20">
+<link rel="stylesheet" href="/assets/pc.css?v=20">
 </head>
 <body>
 
@@ -58,7 +58,17 @@
         <option value="airplanes.live">airplanes.live</option>
       </select>
     </div>
-    <div class="alt-legend" id="alt-legend" hidden></div>
+    <div class="row" id="planes-trail-row" hidden style="margin-top:8px">
+      <span class="eyebrow" style="flex:0 0 auto">Traînées</span>
+      <select id="planes-trail" aria-label="Longueur des traînées"></select>
+    </div>
+    <div class="alt-legend" id="alt-legend" hidden>
+      <div class="alt-head">
+        <span class="eyebrow">Altitude</span>
+        <span id="planes-seen" class="alt-count mono" hidden></span>
+        <button id="alt-all" class="link-btn" type="button" hidden>Toutes</button>
+      </div>
+    </div>
     <div id="planes-mem-row" hidden style="margin-top:9px">
       <button id="planes-forget" class="quick-add" type="button">Oublier l'historique</button>
     </div>
@@ -178,7 +188,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=19"></script>
+<script src="/assets/radar-core.js?v=20"></script>
 <script>
 (function(){
 "use strict";
@@ -250,6 +260,8 @@ var planes = new C.Aircraft(map, {
   radius: prefs.planesRadius || 120,
   mode: prefs.planesMode === 'ligne' ? 'ligne' : 'direct',
   source: prefs.planesSource,
+  bands: prefs.planeBands,
+  trailSpan: prefs.planeTrail || 0,
   on: {
     status: function(msg){
       var c = planes.coverage();
@@ -258,12 +270,19 @@ var planes = new C.Aircraft(map, {
         : msg;
       updatePlaneSpan();
     },
-    count : function(n, ms){
+    count : function(n, ms, total){
       planeCount = n;
+      /*  Quand un palier est décoché, on dit combien d'appareils sont mis de
+          côté : sans cela une carte vide ne se distingue pas d'un silence
+          de la source.                                                    */
+      var vus = (total && total !== n) ? (n + " sur " + total) : (n + " appareils");
+      $("#planes-seen").textContent = vus;
+      $("#planes-seen").hidden = !planes.enabled;
+
       /*  L'horloge bat cinq fois par seconde en mode propre : on ne réécrit
           le texte que lorsqu'il change réellement de seconde.            */
       if(ms && planeMode !== "direct"){
-        var txt = n + " appareils · " + C.clock(new Date(ms), { weekday:"short" });
+        var txt = vus + " · " + C.clock(new Date(ms), { weekday:"short" });
         if(txt !== dernierCadran){ dernierCadran = txt; $("#planes-clock").textContent = txt; }
       }
     }
@@ -271,24 +290,78 @@ var planes = new C.Aircraft(map, {
 });
 var planeCount = 0, dernierCadran = '';
 
+/*  L'échelle d'altitude sert aussi de filtre : chaque palier se décoche.
+    Une même chose à un seul endroit — la légende dit ce qu'on voit, et
+    commande ce qu'on voit.                                              */
 function buildAltLegend(){
   var host = $("#alt-legend");
-  host.textContent = "";
-  C.ALT_BANDS.forEach(function(b){
-    var row = document.createElement("div");
+  C.ALT_BANDS.forEach(function(b, i){
+    var row = document.createElement("label");
     row.className = "band";
-    row.innerHTML = '<span class="sw"></span><span class="lb"></span>';
+    row.innerHTML = '<input type="checkbox" checked><span class="sw"></span><span class="lb"></span>';
     row.querySelector(".sw").style.background = b.color;
     row.querySelector(".lb").textContent = b.label;
+    row.querySelector("input").onchange = function(){ applyBands(); };
     host.appendChild(row);
   });
+
+  var gardees = prefs.planeBands;
+  if(gardees && gardees.length === C.ALT_BANDS.length){
+    bandBoxes().forEach(function(cb, i){ cb.checked = !!gardees[i]; });
+  }
+  applyBands();
+}
+
+function bandBoxes(){
+  return Array.prototype.slice.call($("#alt-legend").querySelectorAll(".band input"));
+}
+
+function applyBands(){
+  var flags = bandBoxes().map(function(cb){ return cb.checked; });
+
+  /*  Tout décocher viderait la carte sans rien apprendre : le dernier
+      palier coché ne se décoche pas.                                    */
+  if(!flags.some(Boolean)){
+    var seul = bandBoxes()[0];
+    seul.checked = true;
+    flags[0] = true;
+  }
+
+  bandBoxes().forEach(function(cb){
+    cb.parentNode.classList.toggle("off", !cb.checked);
+  });
+  $("#alt-all").hidden = flags.every(Boolean);
+
+  planes.setBands(flags);
+  C.Prefs.write({ planeBands: flags });
+}
+
+$("#alt-all").onclick = function(){
+  bandBoxes().forEach(function(cb){ cb.checked = true; });
+  applyBands();
+};
+
+function buildTrailChoices(){
+  var sel = $("#planes-trail");
+  C.TRAIL_SPANS.forEach(function(t){
+    var o = document.createElement("option");
+    o.value = t.ms; o.textContent = t.label;
+    sel.appendChild(o);
+  });
+  sel.value = planes.trailSpan;
+  sel.onchange = function(){
+    planes.setTrailSpan(+sel.value);
+    C.Prefs.write({ planeTrail: +sel.value });
+  };
 }
 buildAltLegend();
+buildTrailChoices();
 
 $("#planes-on").onchange = function(e){
   $("#planes-radius-row").hidden = !e.target.checked;
   $("#planes-mode-row").hidden = !e.target.checked;
   $("#planes-source-row").hidden = !e.target.checked;
+  $("#planes-trail-row").hidden = !e.target.checked;
   $("#planes-mem-row").hidden = !e.target.checked;
   updatePlaneSpan();
   $("#alt-legend").hidden = !e.target.checked;
@@ -657,8 +730,10 @@ document.querySelectorAll('input[name=base]').forEach(function(r){
     maps.bases[baseKey].addTo(map);
     if(withLabels) maps.labels[baseKey].addTo(map);
     C.Prefs.write({ base:baseKey });
+    planes.setBase(baseKey);
   };
 });
+planes.setBase(baseKey);
 
 /* --------------------------------------------- couches ajoutées à la main */
 var custom = {};

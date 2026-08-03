@@ -138,11 +138,35 @@ select{
 }
 
 /*  Échelle des bandes d'altitude : la couleur ne porte jamais seule, chaque
-    palier est nommé.                                                      */
+    palier est nommé. Elle sert aussi de filtre — un palier se décoche, et
+    la même chose se dit et se commande au même endroit.                   */
 .alt-legend{ margin-top:9px }
-.alt-legend .band{ display:flex; align-items:center; gap:8px; padding:2px 0 }
+.alt-head{ display:flex; align-items:center; gap:8px; margin-bottom:3px }
+.alt-count{ font-size:10px; color:var(--dim); margin-left:auto }
+.link-btn{
+  background:none; border:0; padding:0; cursor:pointer;
+  font-family:"IBM Plex Mono",monospace; font-size:10px; color:var(--dim);
+  text-decoration:underline; text-underline-offset:2px;
+}
+.link-btn:hover{ color:var(--bone) }
+
+.alt-legend .band{
+  display:flex; align-items:center; gap:8px; padding:2px 0;
+  cursor:pointer; -webkit-user-select:none; user-select:none;
+}
+/*  La case reste hors de vue : c'est la pastille de couleur qui fait office
+    de témoin — pleine quand le palier est montré, creuse sinon.          */
+.alt-legend .band input{ position:absolute; opacity:0; width:0; height:0 }
 .alt-legend .sw{
   flex:0 0 auto; width:11px; height:11px; border-radius:2px;
   border:1px solid var(--ink);
 }
 .alt-legend .lb{ font-family:"IBM Plex Mono",monospace; font-size:10px; color:var(--dimmer) }
+.alt-legend .band:hover .lb{ color:var(--dim) }
+.alt-legend .band.off .sw{ background:transparent !important; border-color:var(--dimmer) }
+.alt-legend .band.off .lb{ opacity:.55; text-decoration:line-through }
+.alt-legend .band input:focus-visible + .sw{ outline:2px solid var(--bone); outline-offset:2px }
+
+/*  La toile des traînées ne reçoit aucun clic : la carte dessous doit rester
+    saisissable, et la lecture au point la traverse.                       */
+.trail-canvas{ position:absolute; left:0; top:0; pointer-events:none }

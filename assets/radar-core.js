@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "19";
+var VERSION = "20";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -78,6 +78,8 @@ function panes(map){
   map.createPane("static"); map.getPane("static").style.zIndex = 380;
   map.createPane("labels"); map.getPane("labels").style.zIndex = 460;
   map.getPane("labels").style.pointerEvents = "none";
+  map.createPane("trails"); map.getPane("trails").style.zIndex = 465;
+  map.getPane("trails").style.pointerEvents = "none";
   map.createPane("planes"); map.getPane("planes").style.zIndex = 470;
 }
 
@@ -769,10 +771,37 @@ var ALT_BANDS = [
   { max: Infinity, color:"#b7d3f6", label:"> 30 000 pi"  }
 ];
 
-function altBand(ft){
-  if(ft === null || ft === undefined || isNaN(ft)) return ALT_BANDS[0];
-  for(var i = 0; i < ALT_BANDS.length; i++){ if(ft < ALT_BANDS[i].max) return ALT_BANDS[i]; }
-  return ALT_BANDS[ALT_BANDS.length - 1];
+/*  Rang de la bande, qui sert aussi bien à colorer qu'à filtrer. Une altitude
+    absente compte pour la bande la plus basse : c'est déjà la couleur qu'elle
+    porte à l'écran, et un filtre doit retrancher ce qu'on voit, non une
+    catégorie invisible. Le cas est rare — véhicules de piste, cibles TIS-B
+    sans altitude rapportée.                                                */
+/*  Longueurs de traînée offertes. Au-delà d'un quart d'heure le tracé
+    encombre plus qu'il n'informe, et le tampon lui-même ne garde que trois
+    heures.                                                               */
+var TRAIL_SPANS = [
+  { ms:        0, label: "aucune" },
+  { ms:  2*60000, label: "2 min"  },
+  { ms:  5*60000, label: "5 min"  },
+  { ms: 10*60000, label: "10 min" },
+  { ms: 15*60000, label: "15 min" }
+];
+
+function bandIndex(ft){
+  if(ft === null || ft === undefined || isNaN(ft)) return 0;
+  for(var i = 0; i < ALT_BANDS.length; i++){ if(ft < ALT_BANDS[i].max) return i; }
+  return ALT_BANDS.length - 1;
+}
+
+function altBand(ft){ return ALT_BANDS[bandIndex(ft)]; }
+
+/*  Un hex en rgba : les dégradés des traînées demandent une composante alpha,
+    que la notation hexadécimale de la palette ne porte pas.               */
+function rgba(hex, a){
+  var h = hex.replace("#", "");
+  if(h.length === 3) h = h[0]+h[0] + h[1]+h[1] + h[2]+h[2];
+  var n = parseInt(h, 16);
+  return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
 }
 
 function num(v){
@@ -965,6 +994,136 @@ async function fetchPlaneHistory(sinceMs, bounds, cap){
   return rows;
 }
 
+/* ==================================================== traînées de vol ====
+   Le chemin parcouru derrière chaque appareil. Sur une toile, non en
+   polylignes Leaflet : à deux cents appareils ce serait autant d'objets à
+   créer, déplacer et détruire cinq fois par seconde, et le navigateur y
+   passerait plus de temps qu'à tout le reste. Une toile, un tracé par
+   appareil, et l'effacement vient d'un dégradé plutôt que d'un découpage du
+   trait en segments.                                                      */
+var TrailCanvas = L.Layer.extend({
+  options: { pane: "trails" },
+
+  onAdd: function(map){
+    this._canvas = L.DomUtil.create("canvas", "trail-canvas");
+    this._ctx    = this._canvas.getContext("2d");
+    this.getPane().appendChild(this._canvas);
+
+    map.on("moveend zoomend resize", this._reset, this);
+    if(map.options.zoomAnimation && L.Browser.any3d) map.on("zoomanim", this._zoom, this);
+    this._reset();
+  },
+
+  onRemove: function(map){
+    map.off("moveend zoomend resize", this._reset, this);
+    map.off("zoomanim", this._zoom, this);
+    if(this._canvas) L.DomUtil.remove(this._canvas);
+    this._canvas = this._ctx = null;
+  },
+
+  /*  Pendant l'animation de zoom, la toile est simplement transformée : la
+      redessiner à chaque image du zoom coûterait cher pour un résultat
+      identique une fois l'animation finie.                                */
+  _zoom: function(e){
+    var m = this._map,
+        scale = m.getZoomScale(e.zoom, m.getZoom()),
+        offset = m._latLngBoundsToNewLayerBounds(m.getBounds(), e.zoom, e.center).min;
+    L.DomUtil.setTransform(this._canvas, offset, scale);
+  },
+
+  /*  La toile est calée sur le coin haut-gauche du conteneur : les
+      coordonnées de dessin sont donc exactement des points conteneur.     */
+  _reset: function(){
+    if(!this._canvas) return;
+    var m = this._map, size = m.getSize();
+    L.DomUtil.setTransform(this._canvas, m.containerPointToLayerPoint([0, 0]), 1);
+
+    var dpr = Math.min(2, global.devicePixelRatio || 1);
+    this._canvas.width  = Math.round(size.x * dpr);
+    this._canvas.height = Math.round(size.y * dpr);
+    this._canvas.style.width  = size.x + "px";
+    this._canvas.style.height = size.y + "px";
+    this._ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this._size = size;
+    this.redraw();
+  },
+
+  /* Chaque traînée : { color, points:[{lat,lon}, …] }, du plus vieux au plus récent. */
+  draw: function(trails){ this._trails = trails; this.redraw(); },
+
+  /* Le liseré ne sert que sur les fonds clairs — voir redraw. */
+  setLiseré: function(on){ this._liseré = !!on; this.redraw(); },
+
+  redraw: function(){
+    var ctx = this._ctx, m = this._map;
+    if(!ctx || !m) return;
+
+    var size = this._size || m.getSize();
+    ctx.clearRect(0, 0, size.x, size.y);
+
+    var trails = this._trails;
+    if(!trails || !trails.length) return;
+
+    ctx.lineCap  = "round";
+    ctx.lineJoin = "round";
+
+    /*  Le tri se fait d'abord en degrés, sans rien projeter : un rayon de
+        250 NM tient des milliers d'appareils, dont la plupart hors du cadre,
+        et projeter vingt points pour chacun coûterait plus cher que tout le
+        dessin. La marge laisse passer ce qui frôle le bord.               */
+    var vue = m.getBounds().pad(0.3);
+
+    for(var i = 0; i < trails.length; i++){
+      var pts = trails[i].points;
+      if(!pts || pts.length < 2) continue;
+
+      var s = 90, n = -90, w = 180, e = -180;
+      for(var j = 0; j < pts.length; j++){
+        if(pts[j].lat < s) s = pts[j].lat;
+        if(pts[j].lat > n) n = pts[j].lat;
+        if(pts[j].lon < w) w = pts[j].lon;
+        if(pts[j].lon > e) e = pts[j].lon;
+      }
+      if(!vue.intersects(L.latLngBounds([s, w], [n, e]))) continue;
+
+      var xs = [];
+      for(var q = 0; q < pts.length; q++) xs.push(m.latLngToContainerPoint([pts[q].lat, pts[q].lon]));
+
+      var a = xs[0], b = xs[xs.length - 1];
+      /*  Appareil immobile — au sol, ou vu de trop loin : le dégradé n'aurait
+          pas de direction, et le trait ne dirait rien.                     */
+      if(Math.abs(b.x - a.x) + Math.abs(b.y - a.y) < 3) continue;
+
+      ctx.beginPath();
+      ctx.moveTo(xs[0].x, xs[0].y);
+      for(var k = 1; k < xs.length; k++) ctx.lineTo(xs[k].x, xs[k].y);
+
+      /*  Un liseré sombre d'abord, comme sous les marqueurs : sur le fond
+          clair et sur le relief, un bleu pâle seul se perdrait. Sur le fond
+          sombre il n'apporte rien — et c'est un tracé de plus par appareil,
+          ce qui se paie quand la flotte se compte par milliers.           */
+      if(this._liseré){
+        var l = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+        l.addColorStop(0, "rgba(14,16,18,0)");
+        l.addColorStop(1, "rgba(14,16,18,0.55)");
+        ctx.strokeStyle = l;
+        ctx.lineWidth   = 4;
+        ctx.stroke();
+      }
+
+      /*  L'effacement ne va pas jusqu'à l'invisible : sinon la moitié la plus
+          ancienne du tracé ne se voit pas, et une traînée de quinze minutes
+          en paraît sept.                                                  */
+      var g = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+      g.addColorStop(0, rgba(trails[i].color, 0.10));
+      g.addColorStop(1, rgba(trails[i].color, 0.85));
+      ctx.strokeStyle = g;
+      ctx.lineWidth   = 2;
+      ctx.stroke();
+    }
+  }
+});
+
 function Aircraft(map, opts){
   opts = opts || {};
   this.map      = map;
@@ -996,6 +1155,17 @@ function Aircraft(map, opts){
   this.gapMax   = opts.gapMax || 180000;
   this.lastFrame  = null;
   this.lastNewest = null;
+  /*  Filtre d'altitude : un drapeau par bande, dans l'ordre de ALT_BANDS.
+      Une altitude absente compte pour la bande la plus basse — voir
+      bandIndex : on retranche ce que l'œil voit.                          */
+  this.bands = (opts.bands && opts.bands.length === ALT_BANDS.length)
+             ? opts.bands.slice()
+             : ALT_BANDS.map(function(){ return true; });
+
+  /*  Longueur de la traînée, en millisecondes. Zéro l'éteint.            */
+  this.trailSpan = opts.trailSpan || 0;
+  this.trails    = new TrailCanvas();
+
   this.buffer   = {};     // identifiant → relevés datés
   this.meta     = {};     // identifiant → indicatif, immatriculation, type
   this.markers  = {};
@@ -1019,6 +1189,7 @@ Aircraft.prototype.sourceLabel = function(){
 Aircraft.prototype.enable = async function(){
   if(this.enabled) return;
   this.enabled = true;
+  this.trails.addTo(this.map);
   this.layer.addTo(this.map);
 
   var self = this;
@@ -1041,6 +1212,7 @@ Aircraft.prototype.disable = function(){
   this.timer = this.saveTimer = null;
   this.persist();                       // on ne perd pas ce qui a été relevé
   this.map.removeLayer(this.layer);
+  this.map.removeLayer(this.trails);
   this.layer.clearLayers();
   this.markers = {};
   this.histBounds = null;
@@ -1184,6 +1356,28 @@ Aircraft.prototype.stateAt = function(id, ms){
   };
 };
 
+/*  Le chemin parcouru dans les dernières « span » millisecondes précédant
+    l'instant demandé — jamais après : une traînée qui devancerait l'appareil
+    montrerait un avenir que personne ne connaît.
+
+    Un trou plus large que gapMax coupe la traînée : elle repart après le
+    trou. Relier par-dessus tracerait une droite à travers le vide, exactement
+    ce que l'interpolation se refuse déjà à faire.                        */
+Aircraft.prototype.trailAt = function(id, ms, span){
+  var b = this.buffer[id];
+  if(!b || b.length < 2) return null;
+
+  var floor = ms - span, pts = [];
+  for(var i = 0; i < b.length; i++){
+    if(b[i].t < floor) continue;
+    if(b[i].t > ms) break;
+    var prev = pts[pts.length - 1];
+    if(prev && b[i].t - prev.t > this.gapMax) pts.length = 0;   /* on repart */
+    pts.push(b[i]);
+  }
+  return pts.length >= 2 ? pts : null;
+};
+
 Aircraft.prototype.icon = function(s){
   var band = altBand(s.alt);
   return L.divIcon({
@@ -1213,13 +1407,32 @@ Aircraft.prototype.render = function(frameTime, newestTime){
   this.lastNewest = newestTime || this.lastNewest;
 
   var ms = this.clockAt();
-  var shown = {}, n = 0, self = this;
+  var shown = {}, n = 0, total = 0, self = this;
+  var trails = this.trailSpan > 0 ? [] : null;
 
   for(var id in this.buffer){
     var s = this.stateAt(id, ms);
     if(!s) continue;
+    total++;
+
+    /*  Filtre d'altitude. Le relevé reste en mémoire — il est simplement
+        tenu hors de la vue, et revient dès que la bande est rendue.       */
+    var rang = bandIndex(s.alt);
+    if(!this.bands[rang]) continue;
+
     shown[id] = true;
     n++;
+
+    if(trails){
+      var chemin = this.trailAt(id, ms, this.trailSpan);
+      if(chemin){
+        /*  On raccroche la position interpolée : sans elle la traînée
+            s'arrête au dernier relevé et décroche du marqueur, jusqu'à
+            quarante-cinq secondes en arrière.                            */
+        chemin = chemin.concat([{ lat:s.lat, lon:s.lon }]);
+        trails.push({ color: ALT_BANDS[rang].color, points: chemin });
+      }
+    }
 
     var m = this.markers[id];
     if(m){
@@ -1254,7 +1467,9 @@ Aircraft.prototype.render = function(frameTime, newestTime){
     this.layer.removeLayer(this.markers[k]);
     delete this.markers[k];
   }
-  this.on.count(n, ms);
+
+  this.trails.draw(trails);
+  this.on.count(n, ms, total);
 };
 
 Aircraft.prototype.describe = function(id, s){
@@ -1380,7 +1595,6 @@ Aircraft.prototype.forget = async function(){
   this.on.status("Mémoire du trafic effacée.");
 };
 
-/*  Instant auquel la flotte est montrée, selon le mode retenu. */
 /*  Instant auquel la flotte est montrée.
 
     En mode « ligne », c'est le jalon lui-même, sans détour : l'historique
@@ -1400,6 +1614,23 @@ Aircraft.prototype.setMode = function(m){
 };
 
 Aircraft.prototype.setRadius = function(nm){ this.radius = nm; if(this.enabled) this.poll(); };
+
+Aircraft.prototype.setBands = function(flags){
+  if(!flags || flags.length !== ALT_BANDS.length) return;
+  this.bands = flags.slice();
+  this.render();
+};
+
+Aircraft.prototype.setTrailSpan = function(ms){
+  this.trailSpan = Math.max(0, ms | 0);
+  this.render();
+};
+
+/*  Le fond a changé : les traînées ont besoin d'un liseré sur le clair et le
+    relief, d'aucun sur le sombre.                                         */
+Aircraft.prototype.setBase = function(key){
+  this.trails.setLiseré(key !== "dark");
+};
 
 Aircraft.prototype.setFollow = function(on){ this.follow = !!on; this.render(); };
 
@@ -1438,6 +1669,8 @@ global.RadarCore = {
   fetchPlaneHistory: fetchPlaneHistory,
   historyEnabled: historyEnabled,
   ALT_BANDS: ALT_BANDS,
+  bandIndex: bandIndex,
+  TRAIL_SPANS: TRAIL_SPANS,
   extractPlanes: extractPlanes
 };
 

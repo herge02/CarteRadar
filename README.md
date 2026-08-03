@@ -153,6 +153,42 @@ profite donc aux deux versions.
   sources sont proposées, `adsb.lol` et `airplanes.live` : si l'une flanche,
   l'autre est à un clic.
 
+- **Traînées** : le chemin parcouru derrière chaque appareil, de deux à quinze
+  minutes, effacé vers l'arrière. Elles s'arrêtent à l'instant du curseur et
+  ne le devancent jamais — une traînée qui précéderait l'avion montrerait un
+  avenir que personne ne connaît. Un trou de plus de trois minutes entre deux
+  relevés la coupe : elle repart après le trou plutôt que de traverser le vide
+  en ligne droite, comme s'y refuse déjà l'interpolation.
+
+  Elles sont dessinées sur une **toile**, non en polylignes Leaflet : à mille
+  appareils ce serait autant d'objets à créer et détruire cinq fois par
+  seconde. Le tri des traînées hors cadre se fait en degrés, avant toute
+  projection. Un liseré sombre double le trait sur les fonds clair et relief,
+  où un bleu pâle se perdrait ; sur le fond sombre il est omis — inutile là, et
+  c'est un tracé de moins par appareil.
+
+- **Filtre d'altitude** : l'échelle des bandes sert aussi de filtre — chaque
+  palier se décoche, la pastille se creuse, l'intitulé se barre. La même chose
+  se dit et se commande au même endroit. Le décompte passe alors à « 4 sur 5 »,
+  sans quoi une carte vidée par un filtre ne se distinguerait pas d'un silence
+  de la source. Le dernier palier coché ne se décoche pas.
+
+  Une altitude absente — véhicule de piste, cible TIS-B — compte pour la bande
+  la plus basse : c'est déjà la couleur qu'elle porte à l'écran, et un filtre
+  doit retrancher ce qu'on voit.
+
+- **Rayon** : de 20 à **250 NM**, la limite des deux sources. À 250 NM autour
+  de Blainville le cercle atteint Toronto, Boston et l'approche de New York :
+  la flotte s'y compte par milliers. Mesuré à 1 500 appareils avec traînées de
+  quinze minutes, carte dézoomée au maximum — le pire cas — le rendu prend
+  28 ms sur bureau et 167 ms sur un téléphone bridé au quart, pour un budget de
+  200 ms à cinq images par seconde. Sur fond clair, où le liseré revient, ce
+  cas extrême passe à environ 250 ms : l'animation ralentit sans casser.
+
+  Le rayon du **navigateur** est celui-là. Celui de l'enregistrement continu
+  est réglé séparément dans Supabase et vaut 120 NM ; l'élargir multiplie le
+  volume conservé — voir `supabase/README.md`.
+
   **L'historique est celui qu'on a soi-même enregistré — il n'en existe pas
   d'autre.** Aucune source gratuite ne rend les positions passées : l'archive
   d'adsb.lol paraît le lendemain, en fichiers quotidiens, ce qui ne couvre

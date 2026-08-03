@@ -99,6 +99,34 @@ update public.plane_config set
 
 La modification prend effet à la minute suivante.
 
+### Le rayon enregistré n'est pas celui du navigateur
+
+Le curseur de la console monte à 250 NM : c'est le direct, rien n'en est
+conservé. Ici, chaque mille supplémentaire s'écrit dans la base à chaque
+minute, et la surface croît comme le carré du rayon. Passer de 120 à 250 NM,
+c'est un peu plus de quatre fois le volume — la zone atteint alors Toronto,
+Boston et l'approche de New York, et l'estimation ci-dessous sort du quota
+gratuit à 24 h de rétention.
+
+| Rayon | Rétention | Base, en régime |
+|---|---|---|
+| 120 NM | 24 h | ~30 Mo |
+| 250 NM | 24 h | ~130 Mo |
+| 250 NM | 6 h | ~33 Mo |
+
+Ce sont des ordres de grandeur, pas des mesures : le trafic varie du simple au
+triple entre la nuit et le milieu de journée. Pour connaître le vôtre :
+
+```sql
+select pg_size_pretty(pg_total_relation_size('public.plane_fix')) as taille,
+       count(*) as relevés,
+       count(*) filter (where ts > now() - interval '1 hour') as dernière_heure
+  from public.plane_fix;
+```
+
+Si le rayon large vous intéresse, baissez `keep_hours` d'autant : c'est la
+rétention, pas le rayon, qui fixe le régime.
+
 ---
 
 ## Ce que ça consomme
