@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "21";
+var VERSION = "22";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -1028,7 +1028,8 @@ function Aerodromes(map, opts){
   this.group  = L.layerGroup();
   this.shown  = false;
   this.lignes = [];
-  this.seuils = [];      // étiquettes de seuil, cachées de loin
+  this.seuils = [];      // repères de seuil, cachés de loin
+  this.etiquettes = [];  // noms d'aérodrome, désencombrés au zoom
   this.base   = "dark";
 
   this._build();
@@ -1099,20 +1100,22 @@ Aerodromes.prototype._build = function(){
     var sud = a.lat;
     a.pistes.forEach(function(p){ sud = Math.min(sud, p.le.lat, p.he.lat); });
 
+    /*  Largeur laissée au contenu plutôt que fixée : le désencombrement a
+        besoin de la vraie emprise du texte pour savoir s'il en chevauche un
+        autre. Le décalage sous le point est porté par le CSS.            */
     var etiq = L.marker([sud, a.lon], {
       pane: "aero",
       interactive: false,
       keyboard: false,
       icon: L.divIcon({
         className: "aero-lbl",
-        html: '<span class="code">' + a.ident + '</span>'
-            + '<span class="nom">' + a.nom + '</span>',
-        iconSize: [140, 16],
-        /*  Assez bas pour passer sous le repère du seuil le plus au sud, que
-            l'on pousse déjà de seize pixels vers l'extérieur.             */
-        iconAnchor: [70, -24]
+        html: '<i class="wrap"><span class="code">' + a.ident + '</span>'
+            + '<span class="nom">' + a.nom + '</span></i>',
+        iconSize: [0, 0],
+        iconAnchor: [0, 0]
       })
     });
+    self.etiquettes.push(etiq);
     self.group.addLayer(etiq);
   });
 };
@@ -1133,6 +1136,69 @@ Aerodromes.prototype._retaille = function(){
   this.seuils.forEach(function(m){
     var el = m.getElement();
     if(el) el.style.display = visibles ? "" : "none";
+  });
+
+  this._desencombre();
+};
+
+/*  Désencombrement des noms d'aérodrome. En dézoomant, trois étiquettes qui
+    tenaient côte à côte finissent par se superposer en un pâté illisible —
+    à Montréal, Trudeau et Saint-Hubert sont à vingt-six kilomètres, soit
+    moins de la largeur d'un nom dès le zoom 9 sur un téléphone.
+
+    Plutôt que des seuils de zoom taillés pour trois aérodromes précis, on
+    mesure : chaque étiquette est posée si son emprise ne touche pas une
+    étiquette déjà posée. Elle se replie d'abord sur son seul code, puis
+    s'efface. L'ordre du tableau fait l'arbitrage — le premier inscrit garde
+    sa place. La règle tient donc quel que soit le nombre d'aérodromes.   */
+Aerodromes.prototype._desencombre = function(){
+  var m = this.map;
+
+  /*  Emprises à l'écran pour un niveau de détail donné. On mesure au lieu de
+      calculer : la largeur dépend de la police, qu'on ne devine pas.      */
+  var emprises = function(etiquettes, avecNom){
+    var out = [];
+    etiquettes.forEach(function(e){
+      var el = e.getElement();
+      if(!el) return;
+      el.style.display = "";
+      el.querySelector(".nom").style.display = avecNom ? "" : "none";
+      /*  L'emprise reprend le placement du CSS — vingt-quatre pixels sous le
+          point, centrée — élargie d'une gouttière : deux étiquettes qui se
+          frôlent sans se toucher restent illisibles, et les points de Leaflet
+          sont arrondis au pixel, ce qui laisserait passer un contact au
+          cheveu.                                                          */
+      var wrap = el.firstChild, p = m.latLngToContainerPoint(e.getLatLng());
+      var GX = 4, GY = 3;
+      out.push({ el:el, x: p.x - wrap.offsetWidth / 2 - GX, y: p.y + 24 - GY,
+                 w: wrap.offsetWidth + 2 * GX, h: 11 + 2 * GY });
+    });
+    return out;
+  };
+
+  var seTouchent = function(a, b){
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  };
+
+  var toutTient = function(bs){
+    for(var i = 0; i < bs.length; i++)
+      for(var j = i + 1; j < bs.length; j++)
+        if(seTouchent(bs[i], bs[j])) return false;
+    return true;
+  };
+
+  /*  Le niveau de détail est le même pour tous : un rendu où l'un porte son
+      nom et l'autre son seul code a l'air d'un accident. On dégrade donc en
+      bloc — nom entier tant que tout tient, code seul ensuite.           */
+  if(toutTient(emprises(this.etiquettes, true))) return;
+
+  var pris = [];
+  emprises(this.etiquettes, false).forEach(function(b){
+    var libre = pris.every(function(a){ return !seTouchent(a, b); });
+    /*  Passé le repli, ce qui ne tient toujours pas s'efface. L'ordre du
+        tableau arbitre : le premier inscrit garde sa place.              */
+    if(libre) pris.push(b);
+    b.el.style.display = libre ? "" : "none";
   });
 };
 

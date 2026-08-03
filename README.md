@@ -200,6 +200,17 @@ profite donc aux deux versions.
   la plus au sud, non au point de référence — celui-ci tombe entre les pistes,
   et le nom venait s'y coucher en travers.
 
+  **Désencombrement.** En dézoomant, des étiquettes qui tenaient côte à côte
+  finissent par se superposer : Trudeau et Saint-Hubert sont à vingt-six
+  kilomètres, soit moins que la largeur d'un nom dès le zoom 8 sur un
+  téléphone. Plutôt que des seuils de zoom taillés pour trois aérodromes
+  précis, on mesure — chaque étiquette est posée si son emprise, élargie d'une
+  gouttière, ne touche pas une étiquette déjà posée. Le niveau de détail est
+  le même pour tous, car un rendu où l'un porte son nom et l'autre son seul
+  code a l'air d'un accident : nom entier tant que tout tient, code seul
+  ensuite, puis effacement, l'ordre du tableau arbitrant. La règle tient donc
+  quel que soit le nombre d'aérodromes ajoutés.
+
 - **Filtre d'altitude** : l'échelle des bandes sert aussi de filtre — chaque
   palier se décoche, la pastille se creuse, l'intitulé se barre. La même chose
   se dit et se commande au même endroit. Le décompte passe alors à « 4 sur 5 »,

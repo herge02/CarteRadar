@@ -180,7 +180,14 @@ select{
   text-shadow:0 0 3px var(--ink), 0 0 3px var(--ink), 0 0 2px var(--ink);
   white-space:nowrap; pointer-events:none; line-height:1;
 }
-.aero-lbl{ display:flex; align-items:baseline; gap:5px; justify-content:center }
+/*  Le repère ne mesure rien : c'est son contenu qui porte la largeur, centré
+    sur le point et posé sous la piste la plus au sud. Leaflet se réserve la
+    transformation de l'élément lui-même, d'où l'enveloppe intérieure.     */
+.aero-lbl{ width:0; height:0 }
+.aero-lbl .wrap{
+  position:absolute; left:0; top:24px; transform:translateX(-50%);
+  display:flex; align-items:baseline; gap:5px; white-space:nowrap;
+}
 .aero-lbl .code{ font-size:11px; font-weight:600; letter-spacing:.06em }
 .aero-lbl .nom { font-size:10px; color:var(--dim) }
 .rwy-lbl{ font-size:9px; letter-spacing:.05em; text-align:center; color:var(--dim) }
