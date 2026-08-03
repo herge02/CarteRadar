@@ -12,8 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/theme.css?v=16">
-<link rel="stylesheet" href="/assets/pc.css?v=16">
+<link rel="stylesheet" href="/assets/theme.css?v=19">
+<link rel="stylesheet" href="/assets/pc.css?v=19">
 </head>
 <body>
 
@@ -178,7 +178,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/assets/radar-core.js?v=16"></script>
+<script src="/assets/radar-core.js?v=19"></script>
 <script>
 (function(){
 "use strict";
@@ -263,7 +263,7 @@ var planes = new C.Aircraft(map, {
       /*  L'horloge bat cinq fois par seconde en mode propre : on ne réécrit
           le texte que lorsqu'il change réellement de seconde.            */
       if(ms && planeMode !== "direct"){
-        var txt = n + " appareils · " + C.clock(new Date(ms), { second:"2-digit" });
+        var txt = n + " appareils · " + C.clock(new Date(ms), { weekday:"short" });
         if(txt !== dernierCadran){ dernierCadran = txt; $("#planes-clock").textContent = txt; }
       }
     }
@@ -380,11 +380,10 @@ function updatePlaneSpan(){
   var total  = newest - oldest;
   if(total <= 0){ bar.style.display = "none"; return; }
 
-  /*  Une image datée f correspond à l'heure murale « maintenant moins le
-      retard de f sur la dernière image ». La mémoire remonte jusqu'à
-      c.from : le seuil est l'image dont l'équivalent murale y tombe.    */
-  var seuil = newest - (Date.now() - c.from.getTime());
-  var debut = Math.min(1, Math.max(0, (seuil - oldest) / total));
+  /*  La ligne du temps et l'historique se lisent sur la même échelle
+      absolue : la portion couverte commence simplement là où la mémoire
+      commence.                                                          */
+  var debut = Math.min(1, Math.max(0, (c.from.getTime() - oldest) / total));
 
   bar.style.display = "block";
   bar.style.left  = (debut * 100) + "%";

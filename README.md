@@ -80,12 +80,27 @@ profite donc aux deux versions.
 
 - **Ligne du temps** : son pas est indépendant du rythme des images. Trente
   secondes par défaut, réglable de 15 s à 6 min. À chaque jalon, une couche
-  animée montre l'image la plus proche qu'elle possède — elle la garde donc
-  affichée entre deux — tandis que les avions, eux, sont interpolés. C'est ce
-  qui rend leur déplacement continu alors que l'imagerie avance par sauts.
+  animée montre la **dernière image parue** à cet instant — elle la garde donc
+  affichée jusqu'à la suivante — tandis que les avions, eux, sont interpolés.
+  C'est ce qui rend leur déplacement continu alors que l'imagerie avance par
+  sauts.
+
+  La dernière image parue, non la plus proche : à 10 h 10, l'image en vigueur
+  est celle de 10 h 05, pas celle de 10 h 11, qui n'existait pas encore. Sans
+  cette règle, le radar montrait par moments un instant que le curseur n'avait
+  pas encore atteint.
+
+  La ligne **court jusqu'à l'heure courante**, non jusqu'à la dernière image.
+  GeoMet publie en différé : à toute heure, la plus récente a jusqu'à six
+  minutes. S'arrêter à elle amputerait la ligne de ces minutes-là — justement
+  celles où le trafic est connu en direct. La queue montre donc la dernière
+  image, tenue, pendant que les avions avancent. Cette queue est bornée à une
+  cadence d'image : si la source se tait une heure, la ligne s'arrête plutôt
+  que d'afficher une heure de gel sans le dire.
 
   Les graduations de la règle marquent les **instants où une image existe**,
-  pas les jalons : elles disent où l'imagerie change réellement.
+  pas les jalons : elles disent où l'imagerie change réellement. La queue n'en
+  porte donc aucune — c'est l'attente de la prochaine image.
 
 - **Boucle** : jusqu'à 30 images, soit les trois dernières heures. Arrêt d'une
   seconde et demie sur la dernière image avant de reboucler, comme les boucles
@@ -118,6 +133,13 @@ profite donc aux deux versions.
   fonctionne sans historique. **Suivre la ligne du temps** : les avions sont
   montrés à l'instant du curseur, ce qui demande d'avoir enregistré cet
   instant.
+
+  Dans ce second mode, l'heure des avions est **celle du curseur, sans
+  correction** : l'historique est daté en temps absolu et le jalon en est un.
+  Un calcul antérieur passait par « maintenant, moins le retard de la dernière
+  image » — hérité de l'époque où le tampon ne contenait que du direct. Il
+  décalait la flotte de l'âge de l'image, jusqu'à six minutes, et c'est
+  précisément ce qui la désaccordait du curseur.
 
   Ce second mode repose sur une **interpolation** : la collecte ne relève
   qu'une position par minute, une ligne du temps au pas de trente secondes

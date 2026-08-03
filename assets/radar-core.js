@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "16";
+var VERSION = "19";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -374,18 +374,24 @@ Track.prototype.build = async function(wanted, onProgress){
   return true;
 };
 
-/*  Chaque piste a sa cadence : à l'instant demandé par la ligne du temps
-    commune, on montre l'image la plus proche que cette piste possède.
+/*  Chaque piste a sa cadence. À l'instant demandé, on montre la dernière
+    image parue — pas la plus proche : à 00 h 10, l'image en vigueur est
+    celle de 00 h 05, pas celle de 00 h 11, qui n'existait pas encore.
+    L'imagerie tient donc jusqu'à la suivante, ce qui est exactement son
+    comportement réel.
+
     Seules deux opacités changent, pas toute la pile.                     */
 Track.prototype.showAt = function(t){
   var n = this.times.length;
   if(!n) return;
 
-  var ms = t.getTime(), best = 0, delta = Infinity;
+  var ms = t.getTime(), best = -1;
   for(var i = 0; i < n; i++){
-    var d = Math.abs(this.times[i].getTime() - ms);
-    if(d < delta){ delta = d; best = i; }
+    if(this.times[i].getTime() <= ms) best = i;
+    else break;
   }
+  /* Avant la première image connue, on montre celle-ci plutôt que rien. */
+  if(best < 0) best = 0;
   if(best === this.shown) return;
 
   if(this.shown >= 0 && this.frames[this.shown]) this.frames[this.shown].setOpacity(0);
@@ -589,16 +595,39 @@ RadarLoop.prototype.frameTimes = function(){
   return all;
 };
 
+/*  Cadence habituelle de la source : l'écart médian entre deux images. La
+    médiane plutôt que la moyenne, parce qu'un trou dans la série — une
+    image manquée — tirerait la moyenne sans rien dire du rythme réel.   */
+function cadenceOf(f){
+  if(f.length < 2) return 6 * 60000;
+  var ecarts = [];
+  for(var i = 1; i < f.length; i++) ecarts.push(f[i] - f[i - 1]);
+  ecarts.sort(function(a, b){ return a - b; });
+  return ecarts[ecarts.length >> 1] || 6 * 60000;
+}
+
 /*  Ligne du temps : un pas régulier, indépendant du rythme des images. À
-    chaque pas, une piste montre l'image la plus proche qu'elle possède —
-    elle la garde donc affichée entre deux — tandis que les avions, eux,
-    sont interpolés. C'est ce qui rend leur déplacement continu alors que
-    l'imagerie, elle, avance par sauts.                                  */
+    chaque pas, une piste montre la dernière image parue — elle la garde
+    donc affichée entre deux — tandis que les avions, eux, sont interpolés.
+    C'est ce qui rend leur déplacement continu alors que l'imagerie, elle,
+    avance par sauts.                                                    */
 RadarLoop.prototype.retime = function(){
   var f = this.frameTimes();
   if(!f.length){ this.times = []; this.idx = 0; this.on.built(this); return; }
 
   var debut = f[0].getTime(), fin = f[f.length - 1].getTime();
+
+  /*  La ligne court jusqu'à l'instant présent, non jusqu'à la dernière
+      image. GeoMet publie en différé : à toute heure, la plus récente a
+      jusqu'à six minutes. S'arrêter à elle amputerait la ligne de ces
+      minutes-là — justement celles où le trafic est connu en direct. La
+      queue montre donc la dernière image, tenue, pendant que les avions
+      avancent.
+
+      Bornée à une cadence : si la source se tait une heure, mieux vaut une
+      ligne qui s'arrête qu'une heure de gel sans le dire.               */
+  fin = Math.max(fin, Math.min(Date.now(), fin + cadenceOf(f)));
+
   var pas   = Math.max(1000, this.resolution);
   var n     = Math.floor((fin - debut) / pas);
 
@@ -610,11 +639,21 @@ RadarLoop.prototype.retime = function(){
   var out = [];
   for(var i = n; i >= 0; i--) out.push(new Date(fin - i * pas));
 
-  /*  On conserve la position relative dans la boucle plutôt que l'index,
-      qui ne veut plus rien dire quand le pas change.                    */
-  var part = this.times.length > 1 ? this.idx / (this.times.length - 1) : 1;
+  /*  On conserve l'instant regardé, non l'index ni la position relative :
+      ni l'un ni l'autre ne veulent dire la même chose quand le pas change
+      ou que la queue s'allonge. L'instant, lui, ne bouge pas — la vue reste
+      donc où l'œil l'avait laissée.                                      */
+  var vise = this.times.length ? this.times[this.idx].getTime() : null;
   this.times = out;
-  this.idx = Math.round(part * (out.length - 1));
+  this.idx = out.length - 1;
+  if(vise !== null){
+    var ecart = Infinity;
+    for(var j = 0; j < out.length; j++){
+      var d = Math.abs(out[j].getTime() - vise);
+      if(d < ecart){ ecart = d; this.idx = j; }
+      else break;                      /* la suite ne fait que s'éloigner */
+    }
+  }
   this.on.built(this);
 };
 
@@ -684,12 +723,13 @@ RadarLoop.prototype.refresh = async function(){
     try { if(await this.tracks[i].refresh(this.wanted)) changed = true; }
     catch(e){ /* une piste muette ne doit pas arrêter les autres */ }
   }
-  if(!changed) return false;
 
+  /*  On refait la ligne même sans image nouvelle : sa queue s'étire avec
+      l'heure, et c'est là que se voit le trafic le plus frais.          */
   var wasLive = this.idx === this.times.length - 1;
   this.retime();
   this.show(wasLive ? this.times.length - 1 : this.idx);
-  return true;
+  return changed;
 };
 
 /* Une lecture par piste : superposées, elles répondent chacune la sienne. */
@@ -1341,11 +1381,17 @@ Aircraft.prototype.forget = async function(){
 };
 
 /*  Instant auquel la flotte est montrée, selon le mode retenu. */
+/*  Instant auquel la flotte est montrée.
+
+    En mode « ligne », c'est le jalon lui-même, sans détour : l'historique
+    est daté en temps absolu, et le jalon en est un. Un calcul antérieur
+    passait par « maintenant moins le retard sur la dernière image » —
+    hérité de l'époque où le tampon ne contenait que du direct. Il décalait
+    les avions de l'âge de la dernière image, jusqu'à six minutes, et c'est
+    précisément ce qui les désaccordait du curseur.                       */
 Aircraft.prototype.clockAt = function(){
-  var lag = (this.mode === "ligne" && this.lastNewest && this.lastFrame)
-          ? Math.max(0, this.lastNewest.getTime() - this.lastFrame.getTime())
-          : 0;
-  return Date.now() - lag;
+  if(this.mode === "ligne" && this.lastFrame) return this.lastFrame.getTime();
+  return Date.now();
 };
 
 Aircraft.prototype.setMode = function(m){
