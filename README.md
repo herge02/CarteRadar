@@ -167,6 +167,39 @@ profite donc aux deux versions.
   où un bleu pâle se perdrait ; sur le fond sombre il est omis — inutile là, et
   c'est un tracé de moins par appareil.
 
+- **Pistes d'aéroport** : Trudeau (CYUL), Mirabel (CYMX) et Saint-Hubert
+  (CYHU), tracées à leur position et à leur orientation vraies. C'est le
+  contexte qui manquait au trafic : une file d'appareils alignés n'est qu'une
+  file tant qu'on ne voit pas sur quoi elle s'aligne.
+
+  La géométrie tient dans `assets/airports.js` — deux seuils par piste, et le
+  tracé n'est qu'une droite de l'un à l'autre : une piste est droite. Rien
+  n'est demandé au réseau. Pour en ajouter, il suffit d'allonger ce tableau.
+
+  **Provenance et vérification.** Les seuils viennent d'OurAirports (domaine
+  public). À la génération, cap et longueur ont été recalculés depuis les
+  coordonnées et comparés aux valeurs publiées : sept pistes sur huit
+  s'accordent à 1,3 degré et 2,3 pour cent près. La huitième, Mirabel 11/29,
+  porte une note — sa longueur publiée est de 8 852 pi mais ses seuils en
+  couvrent 11 951, la piste ayant vraisemblablement été raccourcie ; elle
+  n'est d'ailleurs plus éclairée.
+
+  Contre-épreuve indépendante : le numéro d'une piste est son cap magnétique
+  arrondi à la dizaine. La déclinaison à Montréal vaut environ 14 degrés
+  **ouest**, donc cap vrai = cap magnétique − 14. Les huit numéros s'accordent
+  ainsi avec les coordonnées à 3,4 degrés près. Deux sources indépendantes —
+  les relevés et la peinture au sol — disent la même chose.
+
+  **CYUL 10/28 est fermée** ; elle est tracée en pointillé effacé et sans
+  repères de seuil, parce qu'un ruban de béton sans explication laisserait
+  croire à une piste inactive faute d'usage.
+
+  Le détail suit le zoom : de loin un simple trait, de près la largeur vraie
+  de la piste et le repère de chaque seuil, poussé vers l'extérieur pour ne
+  pas se poser sur le béton. L'étiquette de l'aérodrome se place sous la piste
+  la plus au sud, non au point de référence — celui-ci tombe entre les pistes,
+  et le nom venait s'y coucher en travers.
+
 - **Filtre d'altitude** : l'échelle des bandes sert aussi de filtre — chaque
   palier se décoche, la pastille se creuse, l'intitulé se barre. La même chose
   se dit et se commande au même endroit. Le décompte passe alors à « 4 sur 5 »,

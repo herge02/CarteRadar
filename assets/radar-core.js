@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "20";
+var VERSION = "21";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -78,6 +78,7 @@ function panes(map){
   map.createPane("static"); map.getPane("static").style.zIndex = 380;
   map.createPane("labels"); map.getPane("labels").style.zIndex = 460;
   map.getPane("labels").style.pointerEvents = "none";
+  map.createPane("aero");   map.getPane("aero").style.zIndex   = 385;
   map.createPane("trails"); map.getPane("trails").style.zIndex = 465;
   map.getPane("trails").style.pointerEvents = "none";
   map.createPane("planes"); map.getPane("planes").style.zIndex = 470;
@@ -994,6 +995,167 @@ async function fetchPlaneHistory(sinceMs, bounds, cap){
   return rows;
 }
 
+/* ====================================================== aérodromes ======
+   Les pistes tracées à leur position et à leur orientation vraies. C'est le
+   contexte qui manquait au trafic : sans elles, une file d'appareils alignés
+   n'est qu'une file ; avec elles, c'est une approche.
+
+   La géométrie vient de assets/airports.js — deux seuils par piste, et le
+   tracé n'est qu'une droite de l'un à l'autre : une piste est droite.     */
+
+/*  Combien de mètres dans un pixel, à cette latitude et à ce zoom. Sert à
+    donner à la piste sa largeur vraie plutôt qu'une épaisseur arbitraire :
+    de près on voit une bande de béton, de loin un trait.                  */
+function metresParPixel(lat, zoom){
+  return 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom);
+}
+
+/*  Direction écran d'un relèvement : x vers l'est, y vers le bas. Mercator
+    conserve les angles, la valeur ne dépend donc pas du zoom.             */
+function capEcran(a, b){
+  var la1 = a.lat * Math.PI/180, la2 = b.lat * Math.PI/180;
+  var dlo = (b.lon - a.lon) * Math.PI/180;
+  var y = Math.sin(dlo) * Math.cos(la2);
+  var x = Math.cos(la1)*Math.sin(la2) - Math.sin(la1)*Math.cos(la2)*Math.cos(dlo);
+  var cap = Math.atan2(y, x);
+  return { x: Math.sin(cap), y: -Math.cos(cap) };
+}
+
+function Aerodromes(map, opts){
+  opts = opts || {};
+  this.map    = map;
+  this.data   = opts.data || global.CarteRadarAirports || [];
+  this.group  = L.layerGroup();
+  this.shown  = false;
+  this.lignes = [];
+  this.seuils = [];      // étiquettes de seuil, cachées de loin
+  this.base   = "dark";
+
+  this._build();
+  var self = this;
+  map.on("zoomend", function(){ self._retaille(); });
+}
+
+/*  Sur le fond sombre la piste est claire, sur les fonds clair et relief elle
+    est sombre : un gris moyen tiendrait des deux côtés sans être net d'aucun. */
+Aerodromes.prototype._encre = function(){
+  return this.base === "dark" ? "#E9E5DD" : "#0E1012";
+};
+
+Aerodromes.prototype._build = function(){
+  var self = this;
+
+  this.data.forEach(function(a){
+    a.pistes.forEach(function(p){
+      var bouts = [[p.le.lat, p.le.lon], [p.he.lat, p.he.lon]];
+
+      var ligne = L.polyline(bouts, {
+        pane: "aero",
+        color: self._encre(),
+        weight: 2,
+        opacity: p.fermee ? 0.3 : 0.85,
+        dashArray: p.fermee ? "3,4" : null,
+        lineCap: "butt",
+        interactive: true
+      });
+
+      var dit = "<b>" + a.ident + " · piste " + p.id + "</b><br>"
+              + p.long.toLocaleString("fr-CA") + " × " + p.larg + " pi · " + p.surface
+              + (p.eclairee ? "" : " · non éclairée")
+              + (p.fermee ? "<br><i>piste fermée</i>" : "")
+              + (p.note ? "<br><i>" + p.note + "</i>" : "");
+      ligne.bindTooltip(dit, { direction:"top", className:"plane-tip", sticky:true });
+
+      ligne._piste = p;
+      self.lignes.push(ligne);
+      self.group.addLayer(ligne);
+
+      /*  Le repère de chaque seuil, poussé vers l'extérieur de la piste pour
+          ne pas se poser dessus.                                          */
+      if(!p.fermee){
+        [[p.le, p.he], [p.he, p.le]].forEach(function(paire){
+          var ici = paire[0], la = paire[1];
+          var u = capEcran(la, ici);                 /* vers l'extérieur */
+          var m = L.marker([ici.lat, ici.lon], {
+            pane: "aero",
+            interactive: false,
+            keyboard: false,
+            icon: L.divIcon({
+              className: "rwy-lbl",
+              html: '<span>' + ici.id + '</span>',
+              iconSize: [34, 14],
+              iconAnchor: [17 - u.x * 16, 7 - u.y * 16]
+            })
+          });
+          self.seuils.push(m);
+          self.group.addLayer(m);
+        });
+      }
+    });
+
+    /*  L'étiquette se pose sous la piste la plus au sud, non au point de
+        référence de l'aérodrome : celui-ci tombe entre les pistes, et le nom
+        venait alors se coucher en travers du béton.                       */
+    var sud = a.lat;
+    a.pistes.forEach(function(p){ sud = Math.min(sud, p.le.lat, p.he.lat); });
+
+    var etiq = L.marker([sud, a.lon], {
+      pane: "aero",
+      interactive: false,
+      keyboard: false,
+      icon: L.divIcon({
+        className: "aero-lbl",
+        html: '<span class="code">' + a.ident + '</span>'
+            + '<span class="nom">' + a.nom + '</span>',
+        iconSize: [140, 16],
+        /*  Assez bas pour passer sous le repère du seuil le plus au sud, que
+            l'on pousse déjà de seize pixels vers l'extérieur.             */
+        iconAnchor: [70, -24]
+      })
+    });
+    self.group.addLayer(etiq);
+  });
+};
+
+/*  Largeur vraie de la piste, et repères de seuil seulement d'assez près :
+    de loin ils se chevaucheraient et ne diraient plus rien.               */
+Aerodromes.prototype._retaille = function(){
+  if(!this.shown) return;
+  var z = this.map.getZoom();
+
+  this.lignes.forEach(function(l){
+    var mpp = metresParPixel(l.getLatLngs()[0].lat, z);
+    var px  = (l._piste.larg * 0.3048) / mpp;
+    l.setStyle({ weight: Math.max(1.5, Math.min(22, px)) });
+  });
+
+  var visibles = z >= 12;
+  this.seuils.forEach(function(m){
+    var el = m.getElement();
+    if(el) el.style.display = visibles ? "" : "none";
+  });
+};
+
+Aerodromes.prototype.show = function(on){
+  this.shown = !!on;
+  if(on){ this.group.addTo(this.map); this._retaille(); }
+  else this.map.removeLayer(this.group);
+};
+
+Aerodromes.prototype.setBase = function(key){
+  this.base = key;
+  var encre = this._encre();
+  this.lignes.forEach(function(l){ l.setStyle({ color: encre }); });
+  var pane = this.map.getPane("aero");
+  if(pane) pane.classList.toggle("sur-clair", key !== "dark");
+};
+
+Aerodromes.prototype.count = function(){
+  var n = 0;
+  this.data.forEach(function(a){ n += a.pistes.length; });
+  return { aeroports: this.data.length, pistes: n };
+};
+
 /* ==================================================== traînées de vol ====
    Le chemin parcouru derrière chaque appareil. Sur une toile, non en
    polylignes Leaflet : à deux cents appareils ce serait autant d'objets à
@@ -1669,6 +1831,7 @@ global.RadarCore = {
   fetchPlaneHistory: fetchPlaneHistory,
   historyEnabled: historyEnabled,
   ALT_BANDS: ALT_BANDS,
+  Aerodromes: Aerodromes,
   bandIndex: bandIndex,
   TRAIL_SPANS: TRAIL_SPANS,
   extractPlanes: extractPlanes

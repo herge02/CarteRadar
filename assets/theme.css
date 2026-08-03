@@ -170,3 +170,26 @@ select{
 /*  La toile des traînées ne reçoit aucun clic : la carte dessous doit rester
     saisissable, et la lecture au point la traverse.                       */
 .trail-canvas{ position:absolute; left:0; top:0; pointer-events:none }
+
+/*  Aérodromes. Les repères portent un liseré de la couleur du fond plutôt
+    qu'un cadre : par-dessus une piste ou un écho, le texte doit rester lisible
+    sans poser un rectangle opaque sur la carte.                           */
+.aero-lbl, .rwy-lbl{
+  font-family:"IBM Plex Mono",monospace;
+  color:var(--bone);
+  text-shadow:0 0 3px var(--ink), 0 0 3px var(--ink), 0 0 2px var(--ink);
+  white-space:nowrap; pointer-events:none; line-height:1;
+}
+.aero-lbl{ display:flex; align-items:baseline; gap:5px; justify-content:center }
+.aero-lbl .code{ font-size:11px; font-weight:600; letter-spacing:.06em }
+.aero-lbl .nom { font-size:10px; color:var(--dim) }
+.rwy-lbl{ font-size:9px; letter-spacing:.05em; text-align:center; color:var(--dim) }
+
+/*  Sur les fonds clairs, l'encre et le halo s'inversent. */
+.leaflet-pane.sur-clair .aero-lbl,
+.leaflet-pane.sur-clair .rwy-lbl{
+  color:var(--ink);
+  text-shadow:0 0 3px var(--bone), 0 0 3px var(--bone), 0 0 2px var(--bone);
+}
+.leaflet-pane.sur-clair .aero-lbl .nom,
+.leaflet-pane.sur-clair .rwy-lbl{ color:#40474E }
