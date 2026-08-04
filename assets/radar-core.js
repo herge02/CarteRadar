@@ -8,7 +8,7 @@
 /*  Version du moteur, affichée dans l'interface. Elle sert à repérer d'un
     coup d'œil un fichier resté en cache : si le numéro montré à l'écran ne
     correspond pas au dernier déploiement, c'est le cache, pas le service. */
-var VERSION = "22";
+var VERSION = "23";
 
 var GEOMET = "https://geo.weather.gc.ca/geomet";
 var TZ     = "America/Toronto";
@@ -398,8 +398,35 @@ Track.prototype.showAt = function(t){
   if(best === this.shown) return;
 
   if(this.shown >= 0 && this.frames[this.shown]) this.frames[this.shown].setOpacity(0);
+  /*  Pendant un zoom les images cachées quittent la carte — voir detache.
+      Celle qu'on demande y revient donc d'abord, sans quoi la boucle
+      tournerait sur du vide le temps du geste.                          */
+  if(!this.map.hasLayer(this.frames[best])) this.frames[best].addTo(this.map);
   this.frames[best].setOpacity(this.opacity);
   this.shown = best;
+};
+
+/*  Un cran de zoom fait recharger à chaque image toute sa grille de tuiles.
+    À quinze images par piste, c'est plus de cent requêtes WMS d'un coup —
+    dont quatorze quinzièmes pour des images invisibles, qui se paient sur
+    la donnée cellulaire et, surtout, prennent les six connexions du
+    navigateur avant celles de l'image regardée. Le temps du geste, seule
+    l'image visible reste : elle a le tuyau pour elle. Les autres reviennent
+    quand la carte s'immobilise.                                          */
+Track.prototype.detache = function(){
+  var self = this;
+  this.frames.forEach(function(l, i){
+    if(i !== self.shown && self.map.hasLayer(l)) self.map.removeLayer(l);
+  });
+};
+
+Track.prototype.rattache = function(){
+  var self = this;
+  this.frames.forEach(function(l, i){
+    if(self.map.hasLayer(l)) return;
+    l.setOpacity(i === self.shown ? self.opacity : 0);
+    l.addTo(self.map);
+  });
 };
 
 Track.prototype.setOpacity = function(v){
@@ -528,6 +555,22 @@ function RadarLoop(map, opts){
     error:    function(){},
     tracks:   function(){}
   }, opts.on || {});
+
+  /*  Allègement de la pile pendant le zoom — voir Track.detache. Le délai
+      au retour laisse passer un pincement qui traverse plusieurs crans :
+      il ne paie alors qu'une fois, et seulement l'image regardée.       */
+  var self = this;
+  this.zoomTimer = null;
+  map.on("zoomstart", function(){
+    clearTimeout(self.zoomTimer);
+    self.tracks.forEach(function(t){ t.detache(); });
+  });
+  map.on("zoomend", function(){
+    clearTimeout(self.zoomTimer);
+    self.zoomTimer = setTimeout(function(){
+      self.tracks.forEach(function(t){ t.rattache(); });
+    }, 900);
+  });
 }
 
 RadarLoop.prototype.find = function(id){
@@ -1509,12 +1552,46 @@ Aircraft.prototype.record = function(planes, when){
                  + clock(new Date(this.since)) + " · " + this.sourceLabel());
 };
 
+/*  La zone que la console suit réellement : le disque de relevé autour du
+    centre, ramené à un rectangle. Le relevé en direct s'y borne déjà — il
+    part avec un centre et un rayon — et c'est donc la même étendue qui doit
+    borner l'archive et la mémoire. Sans cette borne commune, dézoomer fait
+    diverger les deux : le direct reste un disque de cent vingt milles au
+    milieu d'un continent, tandis que l'archive, elle, suit l'écran et
+    rapatrie des milliers d'appareils qu'on ne suit pas.                   */
+Aircraft.prototype.zoneSuivie = function(){
+  var c   = this.map.getCenter();
+  var deg = this.radius / 60;                    /* milles nautiques → degrés */
+  var dlo = deg / Math.max(0.05, Math.cos(c.lat * Math.PI / 180));
+  return L.latLngBounds([c.lat - deg, c.lng - dlo], [c.lat + deg, c.lng + dlo]);
+};
+
+/*  L'oubli se fait sur deux axes. Le temps, comme toujours ; et l'espace,
+    sans quoi un seul dézoom laisse pour trois heures une mémoire gonflée
+    d'appareils qu'on ne regarde plus — et que `render` redessine à chaque
+    battement, bien après le retour au zoom de départ.                    */
+/*  La marge d'oubli est plus large que celle du rapatriement — 0,5 contre
+    0,35 — et le relevé en direct tient dans le disque inscrit. Rien de ce
+    qui vient d'être ramené n'est donc largué tant que la zone ne bouge pas :
+    pas de va-et-vient entre l'archive et l'oubli. Quand la zone se déplace,
+    l'emprise servie cesse de contenir la nouvelle, et syncHistory redemande
+    d'elle-même ce qui manque.                                             */
 Aircraft.prototype.prune = function(now){
   var floor = now - this.keep;
+  var zone  = this.zoneSuivie().pad(0.5);
+
   for(var id in this.buffer){
     var b = this.buffer[id].filter(function(s){ return s.t >= floor; });
-    if(b.length) this.buffer[id] = b;
-    else { delete this.buffer[id]; delete this.meta[id]; }
+    if(!b.length){ delete this.buffer[id]; delete this.meta[id]; continue; }
+
+    /*  On juge sur le dernier relevé connu : un appareil qui a quitté la
+        zone est sorti du sujet, tout son passage part avec lui.          */
+    var fin = b[b.length - 1];
+    if(!zone.contains([fin.lat, fin.lon])){
+      delete this.buffer[id]; delete this.meta[id];
+      continue;
+    }
+    this.buffer[id] = b;
   }
 };
 
@@ -1638,9 +1715,18 @@ Aircraft.prototype.render = function(frameTime, newestTime){
   var shown = {}, n = 0, total = 0, self = this;
   var trails = this.trailSpan > 0 ? [] : null;
 
+  /*  Hors cadre, pas de marqueur. La toile des traînées écarte déjà ce qui
+      ne se voit pas ; le calque des marqueurs, lui, en créait un par
+      appareil de la mémoire, où qu'il soit. Au dézoom cela faisait des
+      milliers d'objets Leaflet et autant de nœuds du document, tous
+      repositionnés cinq fois par seconde. La marge est celle des traînées :
+      ce qui frôle le bord entre sans sauter.                             */
+  var vue = this.map.getBounds().pad(0.3);
+
   for(var id in this.buffer){
     var s = this.stateAt(id, ms);
     if(!s) continue;
+    if(!vue.contains([s.lat, s.lon])) continue;
     total++;
 
     /*  Filtre d'altitude. Le relevé reste en mémoire — il est simplement
@@ -1758,12 +1844,24 @@ Aircraft.prototype.restore = async function(){
 Aircraft.prototype.syncHistory = async function(force){
   if(!historyEnabled()) return false;
 
+  /*  Jamais plus large que la zone suivie. Dézoomer élargit l'écran sans
+      élargir ce que la console suit : demander l'archive de tout l'écran
+      ferait descendre douze mille lignes, par pages de mille et en série,
+      à chaque cran de zoom — pour peupler une carte dont le direct, lui,
+      s'arrête au rayon de relevé.                                        */
   var bounds = this.map.getBounds();
+  var suivie = this.zoneSuivie();
+  if(!suivie.contains(bounds)){
+    bounds = L.latLngBounds(
+      [Math.max(bounds.getSouth(), suivie.getSouth()), Math.max(bounds.getWest(), suivie.getWest())],
+      [Math.min(bounds.getNorth(), suivie.getNorth()), Math.min(bounds.getEast(), suivie.getEast())]);
+    if(!bounds.isValid()) bounds = suivie;
+  }
   if(!force && this.histBounds && this.histBounds.contains(bounds)) return false;
 
   try {
-    /*  On demande un peu plus large que l'écran : un léger déplacement ne
-        redéclenche alors pas tout le rapatriement.                       */
+    /*  On demande un peu plus large que le cadre retenu : un léger
+        déplacement ne redéclenche alors pas tout le rapatriement.        */
     var marge = bounds.pad(0.35);
     var rows  = await fetchPlaneHistory(Date.now() - this.keep, marge, this.cap);
     if(rows){
